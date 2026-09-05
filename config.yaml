@@ -1,0 +1,178 @@
+# ── NVIDIA RAG 知识库配置 ───────────────────────────────────────────
+# 文档路径和分类规则，修改后无需改动代码。
+
+# 分块参数
+chunk_size: 1200
+min_chunk: 300
+batch_size: 5
+
+# 模型配置
+models:
+  dense:
+    default: bge-base-en-v1.5
+    available:
+      - name: all-MiniLM-L6-v2
+        description: "Lightweight 384-dim embedding"
+      - name: bge-base-en-v1.5
+        description: "BAAI base 768-dim embedding"
+      - name: gte-base-en-v1.5
+        description: "GTE base 768-dim embedding"
+      - name: embeddinggemma-300m-npu
+        description: "Google Gemma 300M NPU-optimized"
+  cross_encoder:
+    default: cross-encoder-ms-marco-MiniLM-L-6-v2
+    available:
+      - name: cross-encoder-ms-marco-MiniLM-L-6-v2
+        description: "MS MARCO cross-encoder reranker"
+
+# SoC 名称到 Datasheet 编号的映射（用于对比查询）
+soc_to_datasheet:
+  ORIN N: "DS-11199"
+  ORIN X: "DS-10119"
+  ORIN Y: "DS-11676"
+  ORIN:   "DS-11205"
+  THOR U: "DS-11562"
+  THOR X: "DS-11561"
+
+# 文档分类规则：子路径关键词 → 文档类型
+# 顺序优先，从上到下匹配
+doc_type_rules:
+  - contains: api_reference
+    type: api_reference
+  - contains: datasheet
+    type: datasheet
+  - contains: guide
+    type: guide
+  - contains: trm
+    type: trm
+  - contains: technical_reference
+    type: trm
+  - contains: safety
+    type: safety
+  - contains: swsm
+    type: safety
+  - contains: swcs
+    type: safety
+  - contains: release
+    type: release_notes
+  - contains: scl
+    type: docs
+  - contains: license
+    type: docs
+  - contains: error_id
+    type: docs
+  - contains: reference
+    type: docs
+  - contains: diff_patch
+    type: docs
+  - contains: stm
+    type: docs
+  - contains: spec
+    type: specification
+  - contains: swe-drive
+    type: specification
+  - type: docs                         # 兜底类型
+
+# 文档权重规则：子路径关键词 → 权重值
+weight_rules:
+  - contains: api_reference
+    weight: 3.0
+  - contains: guide
+    weight: 3.0
+  - contains: docs
+    weight: 2.0
+  - contains: trm
+    weight: 2.0
+  - contains: technical_reference
+    weight: 2.0
+  - contains: datasheet
+    weight: 1.0
+  - weight: 1.0                        # 兜底权重
+
+# 文档类型 → ChromaDB 集合名称映射
+collection_map:
+  datasheet: datasheet_chunks
+  trm: trm_chunks
+  guide: guide_chunks
+  api_reference: api_chunks
+  safety: safety_chunks
+  release_notes: release_chunks
+  specification: spec_chunks
+  docs: docs_chunks
+
+# 查询同义词扩展（query expansion）
+query_expansions:
+  flash: [bind, flash, flashing]
+  flashing: [bind, flash, flashing]
+  install: [install, installation, setup, getting_started]
+  installation: [install, installation, setup, getting_started]
+  setup: [install, installation, setup, configuration]
+  config: [configuration, config]
+  configure: [configuration, config]
+  spec: [specification, spec, specs, datasheet]
+  specs: [specification, spec, specs, datasheet]
+  datasheet: [datasheet, specification, spec, specs, data sheet]
+  specification: [specification, spec, specs, datasheet, data sheet]
+  req: [requirement, requirements, req]
+  reqs: [requirement, requirements, req]
+  troubleshoot: [troubleshooting, troubleshoot, error, debug]
+  debug: [debug, troubleshooting, trace]
+  api: [api, api_reference, reference]
+  gpu: [gpu, graphics]
+  cpu: [cpu, ccplex]
+  driveos: [driveos, drive_os, drive os]
+  pdk: [pdk, platform_development_kit]
+  sdk: [sdk, software_development_kit]
+  trm: [trm, technical_reference_manual]
+  soc: [soc, system_on_chip]
+  gmsl: [gmsl, gigabit_multimedia_serial_link]
+  cuda: [cuda, compute_unified_device_architecture]
+  tensorrt: [tensorrt, tensor_rt, tensorrt]
+  scl: [scl, supported_component_list]
+  swsm: [swsm, safety_extensions_manual]
+  afw: [afw, automotive_firmware]
+  fsi: [fsi, functional_safety_island]
+  mcu: [mcu, microcontroller_unit]
+  ccplex: [ccplex, cpu_complex]
+  nvgpu: [nvgpu, gpu]
+  errata: [errata, known_issues, bugs]
+  safety: [safety, functional_safety, iso26262]
+  security: [security, cybersecurity, secure]
+  boot: [boot, bootloader, startup]
+  errcode: [errcode, err_code, error_code, error code, error id]
+  reptrid: [reptrid, reporter_id, reporter id, reporter]
+  errattr: [errattr, err_attr, error_attribute, error attribute]
+  mgbe: [mgbe, multi_gigabit_ethernet, mgbe1, mgbe3, xgbe, xpcs]
+
+# SoC 规格表特征关键词（用于从 datasheet 中识别 SoC 特性表）
+spec_feature_keywords:
+  - gpu
+  - cpu
+  - memory
+  - dla
+  - pva
+  - display
+  - video
+  - pcie
+  - usb
+  - ethernet
+  - camera
+  - isp
+  - boot
+  - security
+  - accelerator
+  - vision
+  - functional safety
+  - platform security
+  - real-time
+  - dmips
+  - cache
+  - l1
+  - l2
+  - l3
+  - advanced gpu
+  - arm cortex
+  - deep learning accelerator
+  - programmable vision
+  - optical flow
+  - nvjpg
