@@ -362,3 +362,64 @@ python3 -m scripts.build.run --model all-MiniLM-L6-v2
 | XLSX 空行过滤 | openpyxl 行级过滤 | 过滤全空行和纯装饰行，减少 ~30% 无效分块 |
 | 查询增强 | agent 自动附带源文件 excerpt + 允许访问 source/ 源文件 | chunk 文本不足时提供更多上下文，PDF 等二进制格式自动跳过 |
 | 配置管理 | 集中式 `config.yaml` | SoC 映射、文档分类、权重等可配置化，新增 SoC 无需改代码 |
+
+## 9. 注册为 opencode 技能
+
+本仓库本身就是一套标准技能目录布局：`SKILL.md` 位于仓库根目录（文件夹名即 frontmatter 中的 `name: esp-rag`），脚本、配置、模型与源文档都以技能内资源的形式组织。注册成功后，opencode 会在需要时按 `description` 自动加载该技能，并用其中的 `agent.py` 查询知识库。
+
+### 9.1 技能发现规则
+
+opencode 的技能加载器在以下位置递归扫描 `**/SKILL.md`：
+
+| 扫描范围 | 路径 |
+|---------|------|
+| 全局技能目录 | `~/.config/opencode/skills/<name>/SKILL.md`（Windows：`%USERPROFILE%\.config\opencode\skills\...`） |
+| 项目技能目录 | `.opencode/skills/<name>/SKILL.md` |
+| 显式注册路径 | `opencode.json` 中 `skills.paths` 列出的任意目录（递归扫描） |
+
+`SKILL.md` 需满足：
+- 文件名固定为 `SKILL.md`，且位于以技能名命名的文件夹内
+- frontmatter 至少包含 `name`（小写连字符，须与文件夹同名）与 `description`（说明技能功能及触发时机）；本仓库的 `description` 为「搜索 ESP32 文档知识库（基于 ChromaDB RAG）」
+
+### 9.2 方式一：项目内注册（本仓库已内置）
+
+仓库根目录的 `opencode.json` 已配置 `skills.paths` 指向自身：
+
+```json
+{
+  "skills": { "paths": ["."] }
+}
+```
+
+因此在 `esp-rag` 目录内启动 opencode 即可自动发现该技能。若要在其它项目内临时使用，把该项目的 `opencode.json` 中 `paths` 指向本仓库（见 9.4）。
+
+### 9.3 方式二：全局注册（任意目录可用）
+
+推荐用目录联接（junction）而非复制，避免 `.chroma_db/`、`models/`、`source/` 在磁盘上重复占用数百 MB：
+
+```powershell
+# Windows (cmd)：在全局技能目录创建 junction 指向本仓库
+cmd /c mklink /J "$env:USERPROFILE\.config\opencode\skills\esp-rag" "D:\09.WorkSpace\esp-rag"
+```
+
+若不需要与仓库保持同步，也可直接复制整个目录：
+
+```powershell
+Copy-Item -Recurse "D:\09.WorkSpace\esp-rag" "$env:USERPROFILE\.config\opencode\skills\esp-rag"
+```
+
+### 9.4 方式三：通过 skills.paths 引用（无需复制）
+
+在全局配置 `%USERPROFILE%\.config\opencode\opencode.json`（任意目录生效）或某项目的 `opencode.json`（仅该项目生效）中加入：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": { "paths": ["D:\\09.WorkSpace\\esp-rag"] }
+}
+```
+
+### 9.5 生效与验证
+
+- 修改 `opencode.json`、`SKILL.md` 或技能文件后，需**退出并重启 opencode**——配置仅在启动时加载，不会热更新
+- 重启后技能应出现在可用技能列表中（技能名 `esp-rag`）；对话中触发该技能时应能正常调用 `scripts/agent.py` 完成检索
