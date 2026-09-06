@@ -1,18 +1,18 @@
 ---
-name: nvidia-rag
-description: 搜索 NVIDIA DriveOS 文档知识库（基于 ChromaDB RAG）
+name: esp-rag
+description: 搜索 ESP32 文档知识库（基于 ChromaDB RAG）
 user_prompt: |
-  搜索 NVIDIA DriveOS 文档知识库（基于 ChromaDB RAG）。
+  搜索 ESP32 文档知识库（基于 ChromaDB RAG）。
 
   用法：
-    nvidia-rag <搜索查询>           # 通用语义搜索
-    nvidia-rag --spec <SoC名称>     # 查询芯片规格
-    nvidia-rag --compare <A,B>      # 对比两款芯片
+    esp-rag <搜索查询>           # 通用语义搜索
+    esp-rag --spec <SoC名称>     # 查询芯片规格
+    esp-rag --compare <A,B>      # 对比两款芯片
 
   示例：
-    nvidia-rag thor 启动流程
-    nvidia-rag --spec Orin-N
-    nvidia-rag --compare Orin-N,Orin-X
+    esp-rag esp32-s3 启动流程
+    esp-rag --spec esp32-s3
+    esp-rag --compare esp32-s3,esp32
 ---
 
 使用 ChromaDB 驱动的 RAG 索引搜索 NVIDIA DriveOS 文档知识库。

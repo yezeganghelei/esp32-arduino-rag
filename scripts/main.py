@@ -419,7 +419,7 @@ def extract_zip_markdown(filepath: str) -> Optional[str]:
             infos = [info for info in zf.infolist() if not info.is_dir()]
             total = len(infos)
 
-            doc_exts = {'.html', '.htm', '.xhtml', '.txt', '.md'}
+            doc_exts = {'.html', '.htm', '.xhtml', '.txt', '.md', '.docx'}
             doc_count = sum(1 for info in infos
                             if Path(info.filename).suffix.lower() in doc_exts)
             doc_size = sum(info.file_size for info in infos
@@ -443,6 +443,15 @@ def extract_zip_markdown(filepath: str) -> Optional[str]:
                         raw = zf.read(info.filename)
                         content = raw.decode('utf-8', errors='replace')
                         md_text = html_to_markdown(content)
+                        if md_text:
+                            header = f"### Source: {info.filename}\n\n"
+                            texts.append(header + md_text)
+                        processed += 1
+                    except Exception:
+                        pass
+                elif ext == '.docx':
+                    try:
+                        md_text = docx_bytes_to_markdown(zf.read(info.filename))
                         if md_text:
                             header = f"### Source: {info.filename}\n\n"
                             texts.append(header + md_text)
@@ -514,6 +523,75 @@ def xlsx_to_markdown(filepath: str) -> Optional[str]:
     except Exception as e:
         print(f"  [SKIP] XLSX error {filepath}: {e}")
         return None
+
+
+# ── DOCX → Markdown ─────────────────────────────────────────────────────────
+
+def _docx_xml_to_markdown(xml_bytes: bytes) -> Optional[str]:
+    """Convert the raw word/document.xml of a DOCX into Markdown."""
+    import re
+    from xml.etree import ElementTree as ET
+    W = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+    try:
+        root = ET.fromstring(xml_bytes)
+    except Exception:
+        return None
+
+    def _para_text(p) -> str:
+        return ''.join(t.text or '' for t in p.iter(W + 't'))
+
+    body = root.find(W + 'body')
+    if body is None:
+        return None
+
+    lines = []
+    for el in body:
+        tag = el.tag
+        if tag == W + 'p':
+            style = el.find(W + 'pPr/' + W + 'pStyle')
+            name = style.get(W + 'val') if style is not None else ''
+            txt = _para_text(el).strip()
+            if not txt:
+                continue
+            if name.startswith('Heading') or name in ('1', '2', '3'):
+                level = ''.join(ch for ch in name if ch.isdigit()) or '1'
+                lines.append('#' * int(level) + ' ' + txt)
+            else:
+                lines.append(txt)
+        elif tag == W + 'tbl':
+            for tr in el.findall(W + 'tr'):
+                cells = [' '.join(_para_text(p).strip() for p in tc.findall(W + 'p'))
+                         for tc in tr.findall(W + 'tc')]
+                if any(cells):
+                    lines.append('| ' + ' | '.join(cells) + ' |')
+            lines.append('')  # blank line after each table
+
+    text = '\n'.join(lines).strip()
+    return text if text else None
+
+
+def docx_to_markdown(filepath: str) -> Optional[str]:
+    """Extract a standalone DOCX file to Markdown (stdlib only)."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(filepath, 'r') as zf:
+            xml_bytes = zf.read('word/document.xml')
+    except Exception as e:
+        print(f"  [SKIP] DOCX error {filepath}: {e}")
+        return None
+    return _docx_xml_to_markdown(xml_bytes)
+
+
+def docx_bytes_to_markdown(raw: bytes) -> Optional[str]:
+    """Extract DOCX content from raw bytes (e.g. a member of a larger ZIP)."""
+    import io
+    import zipfile
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            xml_bytes = zf.read('word/document.xml')
+    except Exception:
+        return None
+    return _docx_xml_to_markdown(xml_bytes)
 
 
 # ── Low-value content filtering ─────────────────────────────────────────────
@@ -646,6 +724,8 @@ def get_documents(base_dir: str):
                     text = extract_zip_markdown(fpath)
                 elif ext == '.xlsx':
                     text = xlsx_to_markdown(fpath)
+                elif ext == '.docx':
+                    text = docx_to_markdown(fpath)
                 else:
                     continue
             except Exception as e:
@@ -2206,7 +2286,7 @@ def build_index(docs_dir: Optional[str] = None,
     for root, _dirs, files in os.walk(docs_dir):
         for fname in sorted(files):
             ext = Path(fname).suffix.lower()
-            if ext not in ('.pdf', '.zip', '.xlsx'):
+            if ext not in ('.pdf', '.zip', '.xlsx', '.docx'):
                 continue
             fpath = os.path.join(root, fname)
             try:
@@ -2390,7 +2470,7 @@ def extract_zip_stream(filepath: str, base_dir: str):
             total = len(infos)
 
             # Quick firmware check
-            doc_exts = {'.html', '.htm', '.xhtml', '.txt', '.md'}
+            doc_exts = {'.html', '.htm', '.xhtml', '.txt', '.md', '.docx'}
             doc_count = sum(1 for info in infos
                             if Path(info.filename).suffix.lower() in doc_exts)
             doc_size = sum(info.file_size for info in infos
@@ -2422,6 +2502,11 @@ def extract_zip_stream(filepath: str, base_dir: str):
                     try:
                         raw = zf.read(info.filename)
                         text = raw.decode('utf-8', errors='replace').strip()
+                    except Exception:
+                        pass
+                elif ext == '.docx':
+                    try:
+                        text = docx_bytes_to_markdown(zf.read(info.filename))
                     except Exception:
                         pass
 
@@ -2476,6 +2561,8 @@ def get_documents_for_file(fpath: str, base_dir: str):
             return
         elif ext == '.xlsx':
             text = xlsx_to_markdown(fpath)
+        elif ext == '.docx':
+            text = docx_to_markdown(fpath)
         else:
             return
     except Exception as e:
