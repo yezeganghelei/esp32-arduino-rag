@@ -102,12 +102,11 @@ MIN_CHUNK = _cfg.get('min_chunk', 300)
 BATCH_SIZE = _cfg.get('batch_size', 5)
 _QUERY_EXPANSIONS = _cfg.get('query_expansions', {})
 SPEC_FEATURE_KEYWORDS = _cfg.get('spec_feature_keywords',
-    ['gpu', 'cpu', 'memory', 'dla', 'pva', 'display', 'video',
+    ['cpu', 'memory', 'display', 'video',
      'pcie', 'usb', 'ethernet', 'camera', 'isp', 'boot', 'security',
-     'accelerator', 'vision', 'functional safety', 'platform security',
+     'functional safety',
      'real-time', 'dmips', 'cache', 'l1', 'l2', 'l3',
-     'advanced gpu', 'arm cortex', 'deep learning accelerator',
-     'programmable vision', 'optical flow', 'nvjpg'])
+     'arm cortex'])
 
 # ── Constants ───────────────────────────────────────────────────────────
 
@@ -902,7 +901,7 @@ def _table_to_natural_language(header: List[str], rows: List[List[str]],
     """Convert a structured table (header + rows) to natural language sentences.
 
     Each row becomes one sentence like:
-      "In <SoC>, GPU: 2048 CUDA Cores, Operating Frequency: up to 1.28 GHz."
+      "In <SoC>, CPU: 240 MHz Xtensa Dual-Core, SRAM: 512 KB."
 
     Falls back to an empty string if the table looks like a register dump
     (header full of hex-like names).
@@ -1116,7 +1115,7 @@ def _detect_soc_name(text: str) -> Optional[str]:
     # SoC pattern extracted from config.yaml soc_to_datasheet keys
     soc_list = '|'.join(re.escape(k) for k in SOC_TO_DATASHEET)
     m = re.search(
-        rf'(?:DRIVE\s+)?({soc_list})',
+        rf'({soc_list})',
         text, re.IGNORECASE
     )
     if m:
@@ -1128,7 +1127,7 @@ def _extract_spec_table(tables_meta: Optional[List[dict]]) -> Optional[dict]:
     """Extract structured specs from datasheet 'SoC Features' table.
 
     Scans tables_meta for the main SoC features table (the one with feature
-    names like 'GPU', 'CPU', 'Memory', 'DLA' in its rows).
+    names like 'CPU', 'Memory' in its rows).
     Returns a dict of {feature_name: value_string} or None.
     """
     if not tables_meta:
@@ -1276,7 +1275,7 @@ def _extract_spec_table(tables_meta: Optional[List[dict]]) -> Optional[dict]:
             # with a multi-word definition containing no technical values
             if re.match(r'^[A-Z][A-Z0-9]{1,7}$', feat.replace(' ', '')):
                 has_tech = bool(re.search(
-                    r'\d+\s*(?:GHz|MHz|GB|MB|KB|bit|core|cuda|tensor)',
+                    r'\d+\s*(?:GHz|MHz|GB|MB|KB|bit|core)',
                     desc_text, re.IGNORECASE))
                 if not has_tech and len(desc_text.split()) >= 2:
                     return True
@@ -1433,8 +1432,8 @@ def _clean_spec_values(specs: Dict[str, str]) -> Dict[str, str]:
         #    If the value starts with a known feature keyword and seems short
         #    (under 30 chars, no data values), append to feature name instead.
         if v and len(v) < 30 and any(kw in v.lower() for kw in
-                                     ['gpu', 'cpu', 'memory', 'dla', 'pva',
-                                      'display', 'video', 'pcie', 'usb',
+                                     ['cpu', 'memory', 'display', 'video',
+                                      'pcie', 'usb', 'ethernet',
                                       'camera', 'isp', 'boot']):
             feat = f"{feat} {v}"
             continue  # Don't set the value — it was really a sub-header
@@ -1696,7 +1695,7 @@ class ChromaIndex:
         self._persist_static_bm25_cache(self._bm25_cache_path(), self._bm25, self._bm25_ids)
 
     def _has_hex_code_query(self, query: str) -> bool:
-        """Check if query contains hex code patterns like 0x8213."""
+        """Check if query contains hex code patterns."""
         return bool(re.search(r'0x[0-9a-fA-F]{2,8}', query))
 
     def _extract_hex_codes(self, query: str) -> List[str]:
@@ -2146,7 +2145,7 @@ class ChromaIndex:
         for i in range(len(all_specs['ids'])):
             md = all_specs['metadatas'][i] if all_specs['metadatas'] else {}
             dt = md.get('doc_title', '')
-            # Substring match: the query (e.g. "ORIN N") appears in doc title,
+            # Substring match: the query (e.g. "ESP32 S3") appears in doc title,
             # OR the doc title prefix (e.g. "DS-11199") contains a token from the query.
             # Skip tokens shorter than 3 chars to avoid false matches from
             # generic prefixes like "DS" or single letters like "U", "X".
@@ -2352,8 +2351,6 @@ def build_index(docs_dir: Optional[str] = None,
             print("Index is up to date.")
             return
         index = existing
-        # Filter out AFW files
-        to_do = [e for e in to_do if 'afw' not in e['path'].lower()]
         # Sort: PDFs first, ZIPs last (SDK API Reference ZIP takes ~1 hour)
         to_do.sort(key=lambda e: (1 if e['source'].lower().endswith('.zip') else 0, e['path']))
         docs_to_index = len(to_do)

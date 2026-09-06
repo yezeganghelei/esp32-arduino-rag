@@ -1,4 +1,4 @@
-# ── NVIDIA RAG 知识库配置 ───────────────────────────────────────────
+# ── ESP32 RAG 知识库配置 ────────────────────────────────────────────
 # 文档路径和分类规则，修改后无需改动代码。
 
 # 分块参数
@@ -27,12 +27,12 @@ models:
 
 # SoC 名称到 Datasheet 编号的映射（用于对比查询）
 soc_to_datasheet:
-  ORIN N: "DS-11199"
-  ORIN X: "DS-10119"
-  ORIN Y: "DS-11676"
-  ORIN:   "DS-11205"
-  THOR U: "DS-11562"
-  THOR X: "DS-11561"
+  esp32-s3: "DS-11199"
+  esp32: "DS-10119"
+  esp32-c3: "DS-11676"
+  esp32-c6: "DS-11205"
+  esp32-h2: "DS-11562"
+  esp32-s2: "DS-11561"
 
 # 文档分类规则：子路径关键词 → 文档类型
 # 顺序优先，从上到下匹配
@@ -49,27 +49,13 @@ doc_type_rules:
     type: trm
   - contains: safety
     type: safety
-  - contains: swsm
-    type: safety
-  - contains: swcs
-    type: safety
   - contains: release
     type: release_notes
-  - contains: scl
-    type: docs
   - contains: license
-    type: docs
-  - contains: error_id
     type: docs
   - contains: reference
     type: docs
-  - contains: diff_patch
-    type: docs
-  - contains: stm
-    type: docs
   - contains: spec
-    type: specification
-  - contains: swe-drive
     type: specification
   - type: docs                         # 兜底类型
 
@@ -119,38 +105,21 @@ query_expansions:
   debug: [debug, troubleshooting, trace]
   api: [api, api_reference, reference]
   gpu: [gpu, graphics]
-  cpu: [cpu, ccplex]
-  driveos: [driveos, drive_os, drive os]
-  pdk: [pdk, platform_development_kit]
+  cpu: [cpu]
   sdk: [sdk, software_development_kit]
   trm: [trm, technical_reference_manual]
   soc: [soc, system_on_chip]
-  gmsl: [gmsl, gigabit_multimedia_serial_link]
-  cuda: [cuda, compute_unified_device_architecture]
-  tensorrt: [tensorrt, tensor_rt, tensorrt]
-  scl: [scl, supported_component_list]
-  swsm: [swsm, safety_extensions_manual]
-  afw: [afw, automotive_firmware]
-  fsi: [fsi, functional_safety_island]
   mcu: [mcu, microcontroller_unit]
-  ccplex: [ccplex, cpu_complex]
-  nvgpu: [nvgpu, gpu]
   errata: [errata, known_issues, bugs]
   safety: [safety, functional_safety, iso26262]
   security: [security, cybersecurity, secure]
   boot: [boot, bootloader, startup]
   errcode: [errcode, err_code, error_code, error code, error id]
-  reptrid: [reptrid, reporter_id, reporter id, reporter]
-  errattr: [errattr, err_attr, error_attribute, error attribute]
-  mgbe: [mgbe, multi_gigabit_ethernet, mgbe1, mgbe3, xgbe, xpcs]
 
 # SoC 规格表特征关键词（用于从 datasheet 中识别 SoC 特性表）
 spec_feature_keywords:
-  - gpu
   - cpu
   - memory
-  - dla
-  - pva
   - display
   - video
   - pcie
@@ -160,19 +129,11 @@ spec_feature_keywords:
   - isp
   - boot
   - security
-  - accelerator
-  - vision
   - functional safety
-  - platform security
   - real-time
   - dmips
   - cache
   - l1
   - l2
   - l3
-  - advanced gpu
   - arm cortex
-  - deep learning accelerator
-  - programmable vision
-  - optical flow
-  - nvjpg

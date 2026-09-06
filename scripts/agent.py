@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-RAG Query Agent — single-call entry point for Daedalus.
+RAG Query Agent — single-call entry point.
 
 Performs pure search and returns raw results. No intent analysis — that is
-handled by the Daedalus AI (the LLM you're talking to).
+handled by the AI (the LLM you're talking to).
 
 Usage:
     python3 agent.py <query> [options]
@@ -21,9 +21,9 @@ Environment:
 
 Examples:
     python3 agent.py "boot process" --top 5
-    python3 agent.py "0x8213 error code" --type trm
-    python3 agent.py --spec "Orin-N"
-    python3 agent.py --compare "Orin-N,Orin-X"
+    python3 agent.py "chip errata" --type docs
+    python3 agent.py --spec "ESP32-S3"
+    python3 agent.py --compare "ESP32-S3,ESP32-C3"
     python3 agent.py --raw "CAN bus configuration"
 """
 

@@ -1,4 +1,4 @@
-# NVIDIA DriveOS RAG skill dependencies
+# ESP32 RAG skill dependencies
 # Temporary install list:
 #  - pysqlite3-binary removed (no Windows wheel for this pin; built-in sqlite3 3.40.1 is enough)
 #  - Pillow 7.0.0 -> 9.5.0 (no cp310 wheel for 7.0.0; 9.5.0 has cp310 win wheel)

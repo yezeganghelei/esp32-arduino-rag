@@ -1,4 +1,4 @@
-# NVIDIA DriveOS RAG skill dependencies
+# ESP32 RAG skill dependencies
 # Install with: pip install -r requirements.txt
 
 # Core RAG pipeline

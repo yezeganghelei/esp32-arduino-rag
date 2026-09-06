@@ -1,13 +1,13 @@
-# NVIDIA DriveOS RAG 技能 — 索引构建与检索引擎
+# ESP32 RAG 技能 — 索引构建与检索引擎
 
 ## 1. 概述
 
-本技能是一个针对 NVIDIA DriveOS 文档知识库的检索增强生成（RAG）系统。它允许 AI 助手在 NVIDIA DriveOS 的 SDK/PDK 开发者指南、数据手册、技术参考手册（TRM）、安全文档、发布说明、错误码参考等大量技术文档中进行语义搜索和问答。
+本技能是一个针对 ESP32 文档知识库的检索增强生成（RAG）系统。它允许 AI 助手在 ESP32 的数据手册、技术参考手册（TRM）、硬件设计指南、芯片 errata 等大量技术文档中进行语义搜索和问答。
 
 技能目录结构：
 
 ```
-~/.daedalus/skills/nvidia-rag/
+<skill_dir>/
 ├── SKILL.md                                       # 技能定义（含 Workflow 指令）
 ├── config.yaml                                    # 文档分类、权重、模型、SoC→Datasheet 映射等配置
 ├── requirements.txt                               # Python 依赖清单
@@ -26,18 +26,12 @@
 │   └── cross-encoder/
 │       └── cross-encoder-ms-marco-MiniLM-L-6-v2/  # 88MB, 重排序模型
 ├── source/                                        # 原始源文档（PDF, ZIP, XLSX）
-│   ├── orin_series/                               # Orin SoC 系列文档
-│   │   ├── datasheet/
-│   │   ├── docs/
-│   │   ├── guide/
-│   │   ├── others/
-│   │   └── trm/
-│   └── thor_series/                               # Thor SoC 系列文档
-│       ├── datasheet/
-│       ├── docs/
-│       ├── guide/
-│       ├── others/
-│       └── trm/
+│   ├── esp32-s3_datasheet_en.pdf                  # ESP32-S3 数据手册
+│   ├── esp32-s3_technical_reference_manual.pdf    # ESP32-S3 技术参考手册
+│   ├── esp32-s3_hardware_design_guidelines_en.pdf # 硬件设计指南
+│   ├── esp-chip-errata-en-master-esp32s3.pdf      # 芯片 errata
+│   ├── ...                                        # 其他芯片/模块/开发板资料
+│   └── (按硬件资源、学习资源等目录组织)
 └── .chroma_db/                                    # ChromaDB 持久化向量数据库
     ├── chroma.sqlite3                             # ChromaDB 元数据存储
     ├── _bm25_cache.pkl                            # BM25 索引持久化缓存（~50MB）
@@ -51,7 +45,7 @@
 **流程**：
 1. **文档提取**：从 `source/` 读取 PDF/ZIP/XLSX 原始源文件
 2. **格式转换**：PDF→Markdown（PyMuPDF + 字体大小标题检测 + 表格感知提取），HTML→Markdown（BeautifulSoup + Markdownify），XLSX→Markdown（openpyxl pipe 表格，含空行和装饰行过滤）
-3. **文本清洗**：去除页脚噪声、页码、"NVIDIA CONFIDENTIAL" 标记、孤立字符碎片
+3. **文本清洗**：去除页脚噪声、页码、"CONFIDENTIAL" 标记、孤立字符碎片
 4. **语义分块**：基于 Markdown 标题层次结构的语义分块（H1/H2 边界分段），段落智能合并/拆分，保护表格完整性
 5. **向量化**：使用 `bge-base-en-v1.5` 模型生成 768 维嵌入向量（可通过 config.yaml 切换模型或在构建时指定 `--model`）
 6. **索引存储**：ChromaDB 持久化存储，支持余弦相似度搜索
@@ -86,9 +80,8 @@ ChromaDB (.chroma_db/)
 | `docs` | docs | docs_chunks | 2.0 |
 | `trm` / `technical_reference` | trm | trm_chunks | 2.0 |
 | `datasheet` | datasheet | datasheet_chunks | 1.0 |
-| `safety` / `swsm` / `swcs` | safety | safety_chunks | 2.0 |
 | `release` | release_notes | release_chunks | 2.0 |
-| `spec` / `swe-drive` | specification | spec_chunks | 2.0 |
+| `spec` | specification | spec_chunks | 2.0 |
 
 ### 3.3 语义分块策略
 
@@ -106,10 +99,9 @@ ChromaDB (.chroma_db/)
 
 定义了领域特定的同义词映射表（`query_expansions`，位于 `config.yaml`），如：
 - `flash` → `['bind', 'flash', 'flashing']`
-- `gpu` → `['gpu', 'graphics']`
+- `boot` → `['boot', 'bootloader', 'startup']`
 - `errcode` → `['errcode', 'error_code', 'error code', 'error id']`
-- `reptrid` → `['reptrid', 'reporter_id', 'reporter id', 'reporter']`
-- `mgbe` → `['mgbe', 'multi_gigabit_ethernet', 'mgbe1', 'mgbe3', 'xgbe', 'xpcs']`
+- `errata` → `['errata', 'known_issues', 'bugs']`
 
 查询时自动扩展，提高召回率。
 
@@ -126,9 +118,9 @@ RRF_score(d) = Σ 1/(60 + rank(d, collection_i))
 针对 datasheet 实现了结构化规格提取：
 
 - 自动检测 "SoC Features" 表格
-- 提取 GPU、CPU、内存、DLA 等关键规格的键值对
+- 提取 CPU、内存、外设接口等关键规格的键值对
 - 存储到独立的 `spec_summary` 集合
-- 支持 "Orin-X vs Orin-N" 格式的查询，自动生成 Markdown 对比表格
+- 支持 "esp32 vs esp32-s3" 格式的查询，自动生成 Markdown 对比表格
 
 SoC 名称到 Datasheet 编号的映射在 `config.yaml` 的 `soc_to_datasheet` 中配置。
 
@@ -136,7 +128,7 @@ SoC 名称到 Datasheet 编号的映射在 `config.yaml` 的 `soc_to_datasheet` 
 
 **Phase 1 — Dense Retrieval（密集向量检索）**：使用 `bge-base-en-v1.5`（可通过 config.yaml 的 `models.dense.default` 配置或构建时 `--model` 切换）对 query 进行向量化，在 ChromaDB 各集合中搜索，多集合结果通过 RRF 融合，候选集扩充至 `n_results × 3~4`。
 
-**Phase 2 — BM25 Hybrid Fusion（混合融合）**：并行执行 BM25 关键词检索，命中结果给密集搜索加分；BM25 特有高分段注入以防遗漏精确匹配。BM25 擅长精确关键词匹配，与密集向量的语义理解互补，尤其对十六进制错误码（如 `0x8213`）、型号编号等密集向量无法有效处理的模式查询至关重要。
+**Phase 2 — BM25 Hybrid Fusion（混合融合）**：并行执行 BM25 关键词检索，命中结果给密集搜索加分；BM25 特有高分段注入以防遗漏精确匹配。BM25 擅长精确关键词匹配，与密集向量的语义理解互补，尤其对十六进制错误码、寄存器地址、型号编号等密集向量无法有效处理的模式查询至关重要。
 - BM25 索引在 `ChromaIndex` 初始化时惰性重建（从 chunks 集合读取所有文档文本），重建后持久化为 `_bm25_cache.pkl` 缓存文件（~50MB）。有缓存时加载耗时约 1 秒；无缓存时首次搜索需从 ChromaDB 全量重建（约 12 秒，48k chunks），重建后自动持久化供后续使用。
 - **不是增量更新**：索引更新（`add_chunks()`）时，BM25 使用累积 token 缓存执行全量重建（`_BM25(token_cache + new_tokens)`），而非原地增量修改。每次重建后同步持久化缓存文件。
 - **缓存完整性校验**：加载缓存时自动比对缓存 ID 数量与 ChromaDB 实际 chunk 数量。不一致则自动重建，避免缓存过期导致的检索遗漏。
@@ -151,9 +143,9 @@ SoC 名称到 Datasheet 编号的映射在 `config.yaml` 的 `soc_to_datasheet` 
 将表格每行转换为自然语言陈述句进行 embedding，提升 short-window 模型对密集表格的理解：
 
 ```
-输入：管道表格          →  输出：In <SoC>, GPU: 2048 CUDA Cores, 64 TC.
-| GPU | 2048 CUDA...|  →         In <SoC>, CPU: 12× Cortex-A78AE.
-| CPU | 12× Cortex...|
+输入：管道表格          →  输出：In <SoC>, CPU: 240 MHz, 2 Cores.
+| CPU | 240 MHz...|   →         In <SoC>, SRAM: 512 KB.
+| SRAM | 512 KB...|
 ```
 
 对于纯十六进制/寄存器表格自动跳过序列化，避免引入噪声。
@@ -226,7 +218,7 @@ if cur_hash and old_hash and cur_hash == old_hash:
 将搜索、格式化和源文件读取封装为一次 Bash 调用，只需一次权限批准：
 
 ```bash
-cd ~/.daedalus/skills/nvidia-rag/scripts
+cd <skill_dir>/scripts
 python3 agent.py "<搜索词>" [--top N] [--type <doc_type>] [--raw]
 ```
 
@@ -239,9 +231,9 @@ python3 agent.py "<搜索词>" [--top N] [--type <doc_type>] [--raw]
 
 示例：
 ```bash
-python3 agent.py "DriveOS 启动流程" --top 5
-python3 agent.py "0x8213 错误码"
-python3 agent.py "Orin-N vs Orin-X"
+python3 agent.py "ESP32-S3 启动流程" --top 5
+python3 agent.py "errata 错误码"
+python3 agent.py "esp32-s3 vs esp32"
 python3 agent.py "bootrom" --raw
 ```
 
@@ -252,14 +244,14 @@ import pysqlite3
 import sys
 sys.modules['sqlite3'] = pysqlite3
 import os
-os.environ['RAG_CHROMA_DIR'] = '~/.daedalus/skills/nvidia-rag/.chroma_db'
+os.environ['RAG_CHROMA_DIR'] = '<skill_dir>/.chroma_db'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['HF_HUB_OFFLINE'] = '1'
-sys.path.insert(0, '~/.daedalus/skills/nvidia-rag/scripts')
+sys.path.insert(0, '<skill_dir>/scripts')
 from main import ChromaIndex
 
-index = ChromaIndex('~/.daedalus/skills/nvidia-rag/.chroma_db')
-results = index.search("DriveOS boot process", n_results=10, hybrid=True, rerank=True)
+index = ChromaIndex('<skill_dir>/.chroma_db')
+results = index.search("ESP32-S3 boot process", n_results=10, hybrid=True, rerank=True)
 ```
 
 ## 6. 索引构建与更新
@@ -268,22 +260,22 @@ results = index.search("DriveOS boot process", n_results=10, hybrid=True, rerank
 
 使用默认模型（bge-base-en-v1.5）构建：
 ```bash
-cd ~/.daedalus/skills/nvidia-rag
+cd <skill_dir>
 python3 -m scripts.build.run
 ```
 
 使用指定模型构建：
 ```bash
-cd ~/.daedalus/skills/nvidia-rag
+cd <skill_dir>
 python3 -m scripts.build.run --model gte-base-en-v1.5
 ```
 
-预期耗时：约 10-12 小时（取决于 CPU 性能）。最耗时的文档是 Orin TRM（13661 页，约 700MB）和 Thor TRM（2076 页）。
+预期耗时：取决于 CPU 性能与语料规模（源文档量级）。
 
 ### 6.2 增量更新
 
 ```bash
-cd ~/.daedalus/skills/nvidia-rag
+cd <skill_dir>
 python3 -m scripts.build.run
 ```
 自动检测变更，只处理新增/修改/删除的文档。也可指定模型：
@@ -361,7 +353,7 @@ python3 -m scripts.build.run --model all-MiniLM-L6-v2
 | 分块策略 | 语义层次化（标题感知） | 保持上下文完整性，优于固定窗口分块 |
 | 表格处理 | 独立分块 + 元数据标记 + Table-to-Text 序列化 | 表格信息密度高需特殊保护；NL 序列化提升 embedding 理解精度 |
 | 检索增强 | BM25 + Dense Hybrid + Cross-Encoder Reranker | 三段式：密集语义→BM25 精确→Cross-Encoder 精排 |
-| 错误码搜索 | 十六进制代码 BM25 自动提升 + 结果强制注入 | 密集向量无法匹配 `0x8213` 模式，BM25 按 token 精确匹配后加权 |
+| 错误码搜索 | 十六进制代码 BM25 自动提升 + 结果强制注入 | 密集向量无法匹配十六进制错误码/寄存器模式，BM25 按 token 精确匹配后加权 |
 | 跨文档对比 | 结构化规格提取 + spec_summary | datasheet 特征表格结构稳定，可自动化对比 |
 | 增量构建 | MD5 内容哈希 + 删除检测 | 无需重复索引未变更文档，MD5 比 mtime 更可靠 |
 | 构建阶段分离 | 文件清单扫描 → 对比 → 流式处理 | Phase 1 纯文件系统操作（<1秒），Phase 3 才做耗时提取+embedding |

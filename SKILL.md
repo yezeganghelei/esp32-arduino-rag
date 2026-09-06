@@ -15,7 +15,7 @@ user_prompt: |
     esp-rag --compare esp32-s3,esp32
 ---
 
-使用 ChromaDB 驱动的 RAG 索引搜索 NVIDIA DriveOS 文档知识库。
+使用 ChromaDB 驱动的 RAG 索引搜索 ESP32 文档知识库。
 
 ## 工作流
 
@@ -24,34 +24,34 @@ user_prompt: |
    # 通用搜索
    python3 <skill_dir>/scripts/agent.py "<查询词>" [--top N] [--type <doc_type>]
 
-   # 结构化规格查询（如 "Orin-N 的 GPU 参数"）
+   # 结构化规格查询（如 "esp32-s3 的 GPU 参数"）
    python3 <skill_dir>/scripts/agent.py --spec "<SoC名称>"
 
-   # 芯片对比（如 "Orin-N 和 Orin-X 的区别"）
+   # 芯片对比（如 "esp32-s3 和 esp32 的区别"）
    python3 <skill_dir>/scripts/agent.py --compare "<SoC_A>,<SoC_B>"
    ```
 
    参数说明：
    - `--top N` : 返回前 N 条结果（默认 10）
    - `--type <doc_type>` : 按文档类型过滤（datasheet, trm, guide, api, safety, release_notes, specification, docs）
-     注意：Error ID Reference 文件的类型是 `docs`，而非 `trm`。不过错误码查询通常无需指定类型，RAG 引擎的 BM25 十六进制提升机制会自动优先匹配 Error ID Reference XLSX。
+     注意：错误码参考（如芯片 errata）文档的类型是 `docs`，而非 `trm`。不过错误码查询通常无需指定类型，RAG 引擎的 BM25 十六进制提升机制会自动优先匹配含错误码的参考表格。
    - `--raw` : JSON lines 格式输出（机器可读）
-   - `--spec <name>` : 查询 SoC 的结构化规格数据（如 "Orin-N"）
-   - `--compare <A,B>` : 对比两个 SoC 的规格（如 "Orin-N,Orin-X"）
+   - `--spec <name>` : 查询 SoC 的结构化规格数据（如 "esp32-s3"）
+   - `--compare <A,B>` : 对比两个 SoC 的规格（如 "esp32-s3,esp32"）
 
    **示例：**
    ```bash
    # 基本搜索
-   python3 <skill_dir>/scripts/agent.py "DriveOS 启动流程" --top 5
+   python3 <skill_dir>/scripts/agent.py "ESP32-S3 启动流程" --top 5
 
-   # 错误码查询 — 不指定 --type，默认搜索即可命中 Error ID Reference XLSX
-   python3 <skill_dir>/scripts/agent.py "0x8213"
+   # 错误码查询 — 不指定 --type，默认搜索即可命中含错误码的参考表格
+   python3 <skill_dir>/scripts/agent.py "0x3000"
 
    # 查询规格
-   python3 <skill_dir>/scripts/agent.py --spec "Orin-N"
+   python3 <skill_dir>/scripts/agent.py --spec "esp32-s3"
 
    # 芯片对比
-   python3 <skill_dir>/scripts/agent.py --compare "Orin-N,Orin-X"
+   python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"
 
    # JSON 格式输出
    python3 <skill_dir>/scripts/agent.py "bootrom" --raw
@@ -71,7 +71,7 @@ user_prompt: |
    ```
    ① agent 输出的 chunk text（`text` 字段）充分 → 直接作答，标注 chunk 来源标题
    ② chunk text 不足 → 用 agent 附带的 source excerpt（`> _Excerpt from source file:_`）
-   ③ excerpt 仍不够 → 主动去 `source/` 目录下读取对应源文件，**使用相对路径**：`Read(~/.daedalus/skills/nvidia-rag/source/<相对路径>)`，不要使用 `/home/liqing/...` 形式
+   ③ excerpt 仍不够 → 主动去 `source/` 目录下读取对应源文件，**使用相对路径**：`Read(<skill_dir>/source/<相对路径>)`，不要使用绝对路径
    ④ 源文件也找不到 → 明确告知用户无法从文档中获取答案
    ```
 
@@ -110,21 +110,21 @@ python3 -m scripts.build.run --model all-MiniLM-L6-v2
 
 ## 搜索优化
 
-- **混合检索**：`hybrid=True` 时，BM25 关键词检索与密集向量检索互补。对于包含十六进制错误码（如 `0x8213`）的查询，系统自动检测并为匹配的 BM25 结果加权提升，确保错误码查询优先命中 Error ID Reference XLSX。
-- **查询扩展**：领域同义词自动扩展（如 `errcode` → `errcode, error_code, error id`；`mgbe` → `mgbe, multi_gigabit_ethernet, mgbe1, mgbe3` 等）。
+- **混合检索**：`hybrid=True` 时，BM25 关键词检索与密集向量检索互补。对于包含十六进制错误码的查询，系统自动检测并为匹配的 BM25 结果加权提升，确保错误码查询优先命中含错误码的参考表格。
+- **查询扩展**：领域同义词自动扩展（如 `errcode` → `errcode, error_code, error id` 等）。
 - **过滤低价值内容**：寄存器转储、十六进制密集行、"Table N" 纯标题等低信息量内容自动过滤。
 - **BM25 持久化缓存**：BM25 索引在首次搜索时从 ChromaDB 重建并缓存为 `.chroma_db/_bm25_cache.pkl`（~50MB），后续搜索直接加载缓存（~1s）。索引更新时自动增量刷新缓存。缓存加载时自动校验文档数量一致性，不一致则重建（解决缓存过期问题）。
 - **XLSX 空行过滤**：XLSX 表格处理时自动过滤全空行和纯装饰行（如 `---|---|---`），减少无效分块。
-- **对比查询**：自动检测 "Orin-N vs Orin-X" 这类对比查询，直接从 spec_summary 集合提取结构化规格数据进行对比。
+- **对比查询**：自动检测 "esp32-s3 vs esp32" 这类对比查询，直接从 spec_summary 集合提取结构化规格数据进行对比。
 
 ## 重要规则
 
 - **不要在技能正常执行期间重建 RAG 索引**。索引必须已存在。
 - 所有回答必须**只**基于检索到的文档内容。
 - 如果无法从文档中找到答案，明确说明。
-- 访问源文件时**必须使用 `~/.daedalus/skills/nvidia-rag/source/` 相对路径**，不要使用 `/home/liqing/...` 绝对路径。
-- 对于跨文档对比查询（如 "Orin-X 和 Orin-N 的区别"），**必须**使用 `--compare` 标志：`python3 <skill_dir>/scripts/agent.py --compare "Orin-N,Orin-X"`。不要做普通搜索，否则返回的是零散段落而非完整对比。
-- 错误码查询（如 "ErrCode-0x10 ReptrId-0x8213 ErrAttr-0x11c"）建议提取关键十六进制值（如 `0x8213`）与模块名称（如 `mgbe1`）组合搜索，效果最佳。注意：RAG 引擎的 BM25 十六进制提升机制会自动优先匹配 Error ID Reference XLSX（类型为 `docs`），无需指定 `--type`。
+- 访问源文件时**必须使用 `<skill_dir>/source/` 相对路径**，不要使用绝对路径。
+- 对于跨文档对比查询（如 "esp32 和 esp32-s3 的区别"），**必须**使用 `--compare` 标志：`python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"`。不要做普通搜索，否则返回的是零散段落而非完整对比。
+- 错误码查询建议提取关键十六进制值与模块名称组合搜索，效果最佳。注意：RAG 引擎的 BM25 十六进制提升机制会自动优先匹配含错误码的参考表格（类型为 `docs`），无需指定 `--type`。
 - **强制重建索引后必须删除 BM25 缓存**：如果重建索引时 `.chroma_db/` 目录未清空（例如仅删除了 `chroma.sqlite3` 而未删除整个目录），BM25 缓存文件 `_bm25_cache.pkl` 可能残留。该缓存基于 chunks 集合的文档 ID 构建，若 chunks 集合内容发生变化但缓存未更新，将导致 BM25 检索返回错误结果或空结果。解决方法：
   ```bash
   rm -f <skill_dir>/.chroma_db/_bm25_cache.pkl
