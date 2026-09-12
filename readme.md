@@ -1,5 +1,7 @@
 # ESP32 RAG Skill — Index Building and Retrieval Engine
 
+> **Note**: AI retrieval is sourced from the `ESP32` materials folder (excluding `01.Software Code`). To ensure answer accuracy, it strictly follows the original descriptions in the source documents and cites the content sources, with no AI speculation!
+
 ## 1. Overview
 
 This skill is a retrieval-augmented generation (RAG) system for an ESP32 documentation knowledge base. It lets an AI assistant perform semantic search and question answering across a large collection of ESP32 datasheets, technical reference manuals (TRMs), hardware design guidelines, chip errata, and other technical documents.

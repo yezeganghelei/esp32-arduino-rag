@@ -19,16 +19,34 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
 
 ## Workflow
 
-1. **Search** — the agent script only performs a raw search; it does not interpret intent. Intent understanding is your (the LLM's) responsibility; choose the appropriate parameters based on your understanding:
+1. **Search** — the agent script only performs a raw search; it does not interpret intent. Intent understanding is your (the LLM's) responsibility; choose the appropriate parameters based on your understanding.
+
+   First activate the virtual environment, or call its interpreter directly:
+
+   Linux / macOS:
+   ```bash
+   source <skill_dir>/.venv/bin/activate
+   # or, without activating:
+   <skill_dir>/.venv/bin/python
+   ```
+
+   Windows (PowerShell):
+   ```powershell
+   <skill_dir>\.venv\Scripts\Activate.ps1
+   # or, without activating:
+   <skill_dir>\.venv\Scripts\python.exe
+   ```
+
+   Then run:
    ```bash
    # General search
-   python3 <skill_dir>/scripts/agent.py "<query>" [--top N] [--type <doc_type>]
+   python <skill_dir>/scripts/agent.py "<query>" [--top N] [--type <doc_type>]
 
    # Structured spec lookup (e.g. "esp32-s3 GPU specs")
-   python3 <skill_dir>/scripts/agent.py --spec "<SoC name>"
+   python <skill_dir>/scripts/agent.py --spec "<SoC name>"
 
    # Chip comparison (e.g. "difference between esp32-s3 and esp32")
-   python3 <skill_dir>/scripts/agent.py --compare "<SoC_A>,<SoC_B>"
+   python <skill_dir>/scripts/agent.py --compare "<SoC_A>,<SoC_B>"
    ```
 
    Parameters:
@@ -42,27 +60,28 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
    **Examples:**
    ```bash
    # Basic search
-   python3 <skill_dir>/scripts/agent.py "ESP32-S3 boot process" --top 5
+   python <skill_dir>/scripts/agent.py "ESP32-S3 boot process" --top 5
 
    # Error-code query — no --type needed; a default search hits the reference tables containing error codes
-   python3 <skill_dir>/scripts/agent.py "0x3000"
+   python <skill_dir>/scripts/agent.py "0x3000"
 
    # Spec lookup
-   python3 <skill_dir>/scripts/agent.py --spec "esp32-s3"
+   python <skill_dir>/scripts/agent.py --spec "esp32-s3"
 
    # Chip comparison
-   python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"
+   python <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"
 
    # JSON output
-   python3 <skill_dir>/scripts/agent.py "bootrom" --raw
+   python <skill_dir>/scripts/agent.py "bootrom" --raw
    ```
 
-2. **Answer**: Answer in English. Base your answer strictly on the retrieved content; do not fabricate information not contained in the documents. Prioritize sources according to the following principles and order:
+2. **Answer**: Answer in the same language the user used in their question, whatever it is (e.g. English question -> English answer, Chinese -> Chinese, German -> German). Base your answer strictly on the retrieved content; do not fabricate information not contained in the documents. Prioritize sources according to the following principles and order:
 
    ### Core principles
 
    1. **Stay faithful to context**: answer strictly based on retrieval results; **never** supplement factual information from your own pretrained knowledge.
    2. **Admit ignorance**: if the retrieved content is insufficient, try the fallbacks below in order; if all are insufficient, reply "Based on the available materials, I cannot answer this question" — **never** make up an answer.
+      **Before concluding a fact is absent, you MUST run several re-searches with different keywords** (synonyms, the exact attribute name, the module/peripheral name, phrases like "total / count / number of", register or pin names, etc.). A single low-recall query is NOT evidence that the documents lack the fact. Never say "not in retrieved specs / not in the documents" based on one search.
    3. **Cite sources**: every key fact or figure in the answer must be attributed. Use the format `[Source: <document name>-<document title>]`.
    4. **Handle conflicts**: if retrieved passages contradict each other, point out the conflict and explain each source's claim separately.
 
@@ -105,7 +124,7 @@ models:
 ### Switch temporarily at build time (without editing config.yaml)
 
 ```bash
-python3 -m scripts.build.run --model all-MiniLM-L6-v2
+python -m scripts.build.run --model all-MiniLM-L6-v2
 ```
 
 ## Search optimizations
@@ -122,21 +141,40 @@ python3 -m scripts.build.run --model all-MiniLM-L6-v2
 - **Do not rebuild the RAG index while the skill is running normally**. The index must already exist.
 - All answers must be based **only** on the retrieved document content.
 - If the answer cannot be found in the documents, state so clearly.
+- **Exhaust recall before declaring absence**: when a fact is missing from the first results, re-search with different keywords/phrasings before giving up. Examples: for a pin count try `"<chip> GPIO number total"`, `"how many GPIO"`, or the peripheral name; raise `--top`; try another `--type`; or query the exact register/section name. Only after several distinct queries still return nothing may you state the answer is not available in the documents.
+- **Distinguish "not found by this search" from "not present in the documents"**: a fact being absent from the top-N chunks means the search missed it, not that the document lacks it. When the retrieved chunk only shows a module name without the value (e.g. a block diagram listing `GPIO`), do NOT record it as "count not in retrieved specs" — issue a dedicated query for that value first.
+- **Do not contradict a previously retrieved fact**: once a value has been retrieved from the documents, reuse it consistently in later answers/tables rather than marking the field as unknown.
 - When accessing source files, **always use the `<skill_dir>/source/` relative path**; do not use absolute paths.
-- For cross-document comparison queries (e.g. "difference between esp32 and esp32-s3"), you **must** use the `--compare` flag: `python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"`. Do not do a plain search, otherwise you get scattered passages instead of a complete comparison.
+- For cross-document comparison queries (e.g. "difference between esp32 and esp32-s3"), you **must** use the `--compare` flag: `python <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"`. Do not do a plain search, otherwise you get scattered passages instead of a complete comparison.
 - For error-code queries, it is best to combine the key hexadecimal value with the module name. Note: the RAG engine's BM25 hex boosting automatically prioritizes reference tables containing error codes (type `docs`), so no `--type` is needed.
 - **After a forced index rebuild, you must delete the BM25 cache**: if the `.chroma_esp32_all/` directory was not emptied during the rebuild (e.g. only `chroma.sqlite3` was deleted but not the whole directory), the BM25 cache file `_bm25_cache.pkl` may remain. That cache is built from the document IDs of the chunks collection; if the chunks collection changes but the cache is not updated, BM25 retrieval will return wrong or empty results. Solution:
+  Linux / macOS:
   ```bash
   rm -f <skill_dir>/.chroma_esp32_all/_bm25_cache.pkl
+  ```
+
+  Windows (PowerShell):
+  ```powershell
+  Remove-Item -Force <skill_dir>\.chroma_esp32_all\_bm25_cache.pkl
   ```
   It will be rebuilt automatically on the first `search()` call.
 
 ## Dependencies
 
-Python packages (install via `pip install -r requirements.txt`):
+Create the virtual environment (once) and install the Python packages:
+
+Linux / macOS:
 ```bash
 cd <skill_dir>
-pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+```powershell
+cd <skill_dir>
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 Key dependencies: sentence-transformers, chromadb, PyMuPDF, rank-bm25, BeautifulSoup, markdownify, openpyxl.
@@ -154,13 +192,22 @@ Key dependencies: sentence-transformers, chromadb, PyMuPDF, rank-bm25, Beautiful
 
 ## Build/rebuild the index
 
-If the source documents in `source/` are updated, rebuild the ChromaDB index:
+If the source documents in `source/` are updated, rebuild the ChromaDB index. Activate the virtual environment first (see Workflow), then clear the potentially stale BM25 cache and build:
 
+Linux / macOS:
 ```bash
 cd <skill_dir>
-rm -f .chroma_esp32_all/_bm25_cache.pkl  # clear the potentially stale BM25 cache
-python3 -m scripts.build.run                     # use the default model (bge-base-en-v1.5)
-python3 -m scripts.build.run --model gte-base-en-v1.5  # build with the specified model
+rm -f .chroma_esp32_all/_bm25_cache.pkl
+python -m scripts.build.run                      # default model (bge-base-en-v1.5)
+python -m scripts.build.run --model gte-base-en-v1.5   # specified model
+```
+
+Windows (PowerShell):
+```powershell
+cd <skill_dir>
+Remove-Item -Force .chroma_esp32_all\_bm25_cache.pkl
+python -m scripts.build.run                      # default model (bge-base-en-v1.5)
+python -m scripts.build.run --model gte-base-en-v1.5   # specified model
 ```
 
 This will:
@@ -168,12 +215,21 @@ This will:
 2. **Streaming** — process one document at a time (especially ZIP files: extract each inner sub-file one by one -> chunk -> vectorize -> index, freeing memory immediately afterward, without loading the whole ZIP into memory at once)
 3. **Monitoring** — print index status (document count, chunk count) automatically every 10 minutes
 
-Build a specific file or directory:
+Build a specific file or directory (after activation):
 ```bash
-python3 -m scripts.build.run <path>
+python -m scripts.build.run <path>
 ```
 
 Full rebuild from scratch:
+
+Linux / macOS:
 ```bash
-rm -rf <skill_dir>/.chroma_esp32_all && python3 -m scripts.build.run
+rm -rf <skill_dir>/.chroma_esp32_all
+python -m scripts.build.run
+```
+
+Windows (PowerShell):
+```powershell
+Remove-Item -Recurse -Force <skill_dir>\.chroma_esp32_all
+python -m scripts.build.run
 ```
