@@ -258,42 +258,85 @@ results = index.search("ESP32-S3 boot process", n_results=10, hybrid=True, reran
 
 ### 6.1 First Build
 
-Build with the default model (bge-base-en-v1.5):
+All commands below run from the skill root. Activate the virtual environment first:
+
+Linux / macOS:
 ```bash
 cd <skill_dir>
-python3 -m scripts.build.run
+source .venv/bin/activate
+```
+
+Windows (PowerShell):
+```powershell
+cd <skill_dir>
+.\.venv\Scripts\Activate.ps1
+```
+
+Then build with the default model (bge-base-en-v1.5):
+```bash
+python -m scripts.build.run
 ```
 
 Build with a specified model:
 ```bash
-cd <skill_dir>
-python3 -m scripts.build.run --model gte-base-en-v1.5
+python -m scripts.build.run --model gte-base-en-v1.5
+```
+
+If you prefer not to activate the venv, call its interpreter directly:
+
+Linux / macOS:
+```bash
+.venv/bin/python -m scripts.build.run
+```
+
+Windows (PowerShell):
+```powershell
+.\.venv\Scripts\python.exe -m scripts.build.run
 ```
 
 Expected duration: depends on CPU performance and corpus size (source document volume).
 
 ### 6.2 Incremental Update
 
+With the virtual environment activated (see 6.1):
 ```bash
-cd <skill_dir>
-python3 -m scripts.build.run
+python -m scripts.build.run
 ```
 Changes are detected automatically; only added/modified/deleted documents are processed. A model can also be specified:
 ```bash
-python3 -m scripts.build.run --model all-MiniLM-L6-v2
+python -m scripts.build.run --model all-MiniLM-L6-v2
 ```
 
 ### 6.3 Forced Full Rebuild
 
+Linux / macOS:
 ```bash
-rm -rf .chroma_esp32_all && python3 -m scripts.build.run
+rm -rf .chroma_esp32_all
+python -m scripts.build.run
+```
+
+Windows (PowerShell):
+```powershell
+Remove-Item -Recurse -Force .chroma_esp32_all
+python -m scripts.build.run
 ```
 
 Note: if you delete only `.chroma_esp32_all/chroma.sqlite3` but keep the `.chroma_esp32_all` directory, the old `_bm25_cache.pkl` may remain and cause BM25 to return wrong results. The safe approach is to delete the entire `.chroma_esp32_all/` directory, or delete the cache manually after rebuilding:
+
+Linux / macOS:
 ```bash
-rm -rf .chroma_esp32_all && python3 -m scripts.build.run
+rm -rf .chroma_esp32_all && python -m scripts.build.run
 # or:
-rm -rf .chroma_esp32_all/chroma.sqlite3 .chroma_esp32_all/_bm25_cache.pkl && python3 -m scripts.build.run
+rm -f .chroma_esp32_all/chroma.sqlite3 .chroma_esp32_all/_bm25_cache.pkl && python -m scripts.build.run
+```
+
+Windows (PowerShell):
+```powershell
+Remove-Item -Recurse -Force .chroma_esp32_all
+python -m scripts.build.run
+# or:
+Remove-Item -Force .chroma_esp32_all\chroma.sqlite3, .chroma_esp32_all\_bm25_cache.pkl
+python -m scripts.build.run
 ```
 
 ### 6.4 Building an External Corpus / Separate Database (Markdown support + directory exclusion)
@@ -312,6 +355,15 @@ Environment variables:
 
 **Example: index external ESP32 materials into a separate database** (excluding the SDK source tree):
 
+Linux / macOS:
+```bash
+export RAG_DOCS_DIR="/path/to/esp32"
+export RAG_CHROMA_DIR="<skill_dir>/.chroma_esp32_all"
+export RAG_EXCLUDE_DIRS="01. Software Code"
+.venv/bin/python -m scripts.build.run
+```
+
+Windows (PowerShell):
 ```powershell
 $env:RAG_DOCS_DIR="D:\01.亚马逊\ESP32\esp\ESP32"
 $env:RAG_CHROMA_DIR="D:\09.WorkSpace\esp-rag\.chroma_esp32_all"
