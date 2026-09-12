@@ -1,12 +1,12 @@
-# ── ESP32 RAG 知识库配置 ────────────────────────────────────────────
-# 文档路径和分类规则，修改后无需改动代码。
+# ── ESP32 RAG knowledge base configuration ──────────────────────────
+# Document paths and classification rules; edit without touching code.
 
-# 分块参数
+# Chunking parameters
 chunk_size: 1200
 min_chunk: 300
 batch_size: 5
 
-# 模型配置
+# Model configuration
 models:
   dense:
     default: bge-base-en-v1.5
@@ -25,7 +25,7 @@ models:
       - name: cross-encoder-ms-marco-MiniLM-L-6-v2
         description: "MS MARCO cross-encoder reranker"
 
-# SoC 名称到 Datasheet 编号的映射（用于对比查询）
+# SoC name -> datasheet number mapping (used for comparison queries)
 soc_to_datasheet:
   esp32-s3: "DS-11199"
   esp32: "DS-10119"
@@ -34,8 +34,8 @@ soc_to_datasheet:
   esp32-h2: "DS-11562"
   esp32-s2: "DS-11561"
 
-# 文档分类规则：子路径关键词 → 文档类型
-# 顺序优先，从上到下匹配
+# Document classification rules: subpath keyword -> document type
+# Order matters; the first matching rule from the top wins
 doc_type_rules:
   - contains: api_reference
     type: api_reference
@@ -57,9 +57,9 @@ doc_type_rules:
     type: docs
   - contains: spec
     type: specification
-  - type: docs                         # 兜底类型
+  - type: docs                         # fallback type
 
-# 文档权重规则：子路径关键词 → 权重值
+# Document weight rules: subpath keyword -> weight value
 weight_rules:
   - contains: api_reference
     weight: 3.0
@@ -73,9 +73,9 @@ weight_rules:
     weight: 2.0
   - contains: datasheet
     weight: 1.0
-  - weight: 1.0                        # 兜底权重
+  - weight: 1.0                        # fallback weight
 
-# 文档类型 → ChromaDB 集合名称映射
+# Document type -> ChromaDB collection name mapping
 collection_map:
   datasheet: datasheet_chunks
   trm: trm_chunks
@@ -86,7 +86,7 @@ collection_map:
   specification: spec_chunks
   docs: docs_chunks
 
-# 查询同义词扩展（query expansion）
+# Query synonym expansion (query expansion)
 query_expansions:
   flash: [bind, flash, flashing]
   flashing: [bind, flash, flashing]
@@ -116,7 +116,7 @@ query_expansions:
   boot: [boot, bootloader, startup]
   errcode: [errcode, err_code, error_code, error code, error id]
 
-# SoC 规格表特征关键词（用于从 datasheet 中识别 SoC 特性表）
+# SoC spec table feature keywords (used to identify the SoC feature table in a datasheet)
 spec_feature_keywords:
   - cpu
   - memory

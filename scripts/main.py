@@ -1520,10 +1520,10 @@ def _detect_comparison_query(query: str) -> Optional[Tuple[List[str], str]]:
                 (m.group(3) or '').strip())
 
     # Pattern 5: Chinese comparison patterns
-    #   "X 和 Y 有什么区别/差异/不同/差别"
-    #   "X 和 Y 的区别"
-    #   "对比 X 和 Y"
-    #   "X 相比/对比 Y"
+    #   "X and Y - what is the difference/diff/discrepancy/contrast"
+    #   "the difference between X and Y"
+    #   "compare X and Y"
+    #   "X compared with Y"
     m = re.search(r'^(.+?)\s+(?:和|与|跟)\s+(.+?)\s+有.{0,2}(?:区别|差异|不同|差别)', q)
     if m:
         return ([m.group(1).strip().upper(), m.group(2).strip().upper()], '')

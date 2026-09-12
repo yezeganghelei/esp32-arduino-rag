@@ -1,178 +1,179 @@
 ---
 name: esp-rag
-description: 搜索 ESP32 文档知识库（基于 ChromaDB RAG）
+description: Search the ESP32 documentation knowledge base (ChromaDB RAG)
 user_prompt: |
-  搜索 ESP32 文档知识库（基于 ChromaDB RAG）。
+  Search the ESP32 documentation knowledge base (ChromaDB RAG).
 
-  用法：
-    esp-rag <搜索查询>           # 通用语义搜索
-    esp-rag --spec <SoC名称>     # 查询芯片规格
-    esp-rag --compare <A,B>      # 对比两款芯片
+  Usage:
+    esp-rag <search query>        # general semantic search
+    esp-rag --spec <SoC name>     # look up chip specifications
+    esp-rag --compare <A,B>       # compare two chips
 
-  示例：
-    esp-rag esp32-s3 启动流程
+  Examples:
+    esp-rag esp32-s3 boot process
     esp-rag --spec esp32-s3
     esp-rag --compare esp32-s3,esp32
 ---
 
-使用 ChromaDB 驱动的 RAG 索引搜索 ESP32 文档知识库。
+Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index.
 
-## 工作流
+## Workflow
 
-1. **搜索** — agent 脚本只做纯搜索，不做意图判断。意图理解由你（LLM）负责，根据理解选用合适的参数：
+1. **Search** — the agent script only performs a raw search; it does not interpret intent. Intent understanding is your (the LLM's) responsibility; choose the appropriate parameters based on your understanding:
    ```bash
-   # 通用搜索
-   python3 <skill_dir>/scripts/agent.py "<查询词>" [--top N] [--type <doc_type>]
+   # General search
+   python3 <skill_dir>/scripts/agent.py "<query>" [--top N] [--type <doc_type>]
 
-   # 结构化规格查询（如 "esp32-s3 的 GPU 参数"）
-   python3 <skill_dir>/scripts/agent.py --spec "<SoC名称>"
+   # Structured spec lookup (e.g. "esp32-s3 GPU specs")
+   python3 <skill_dir>/scripts/agent.py --spec "<SoC name>"
 
-   # 芯片对比（如 "esp32-s3 和 esp32 的区别"）
+   # Chip comparison (e.g. "difference between esp32-s3 and esp32")
    python3 <skill_dir>/scripts/agent.py --compare "<SoC_A>,<SoC_B>"
    ```
 
-   参数说明：
-   - `--top N` : 返回前 N 条结果（默认 10）
-   - `--type <doc_type>` : 按文档类型过滤（datasheet, trm, guide, api, safety, release_notes, specification, docs）
-     注意：错误码参考（如芯片 errata）文档的类型是 `docs`，而非 `trm`。不过错误码查询通常无需指定类型，RAG 引擎的 BM25 十六进制提升机制会自动优先匹配含错误码的参考表格。
-   - `--raw` : JSON lines 格式输出（机器可读）
-   - `--spec <name>` : 查询 SoC 的结构化规格数据（如 "esp32-s3"）
-   - `--compare <A,B>` : 对比两个 SoC 的规格（如 "esp32-s3,esp32"）
+   Parameters:
+   - `--top N` : return the top N results (default 10)
+   - `--type <doc_type>` : filter by document type (datasheet, trm, guide, api, safety, release_notes, specification, docs)
+     Note: error-code references (e.g. chip errata) have doc type `docs`, not `trm`. However, error-code queries usually do not need a type filter; the RAG engine's BM25 hex boosting automatically prioritizes reference tables that contain error codes.
+   - `--raw` : JSON lines output (machine-readable)
+   - `--spec <name>` : look up structured spec data for a SoC (e.g. "esp32-s3")
+   - `--compare <A,B>` : compare the specs of two SoCs (e.g. "esp32-s3,esp32")
 
-   **示例：**
+   **Examples:**
    ```bash
-   # 基本搜索
-   python3 <skill_dir>/scripts/agent.py "ESP32-S3 启动流程" --top 5
+   # Basic search
+   python3 <skill_dir>/scripts/agent.py "ESP32-S3 boot process" --top 5
 
-   # 错误码查询 — 不指定 --type，默认搜索即可命中含错误码的参考表格
+   # Error-code query — no --type needed; a default search hits the reference tables containing error codes
    python3 <skill_dir>/scripts/agent.py "0x3000"
 
-   # 查询规格
+   # Spec lookup
    python3 <skill_dir>/scripts/agent.py --spec "esp32-s3"
 
-   # 芯片对比
+   # Chip comparison
    python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"
 
-   # JSON 格式输出
+   # JSON output
    python3 <skill_dir>/scripts/agent.py "bootrom" --raw
    ```
 
-2. **回答**：语言要求中文。严格基于检索到的内容，不编造文档中未包含的信息。根据信息来源按以下原则和优先级作答：
+2. **Answer**: Answer in English. Base your answer strictly on the retrieved content; do not fabricate information not contained in the documents. Prioritize sources according to the following principles and order:
 
-   ### 核心原则
+   ### Core principles
 
-   1. **忠于上下文**：严格基于检索结果回答，**严禁**使用自身预训练知识补充任何事实性信息。
-   2. **坦诚不知**：如果检索内容不足，按下方优先级逐步尝试；若全部不足，回复"根据现有资料，我无法回答这个问题"，**切勿**编造答案。
-   3. **注明来源**：回答中每个关键事实或数据，都必须注明来源。使用 `[来源: <文档名称>-<文档标题>]` 格式标注。
-   4. **处理冲突**：如果检索到的不同片段存在矛盾，指出冲突并分别说明不同来源的说法。
+   1. **Stay faithful to context**: answer strictly based on retrieval results; **never** supplement factual information from your own pretrained knowledge.
+   2. **Admit ignorance**: if the retrieved content is insufficient, try the fallbacks below in order; if all are insufficient, reply "Based on the available materials, I cannot answer this question" — **never** make up an answer.
+   3. **Cite sources**: every key fact or figure in the answer must be attributed. Use the format `[Source: <document name>-<document title>]`.
+   4. **Handle conflicts**: if retrieved passages contradict each other, point out the conflict and explain each source's claim separately.
 
-   ### 信息优先级
+   ### Information priority
 
    ```
-   ① agent 输出的 chunk text（`text` 字段）充分 → 直接作答，标注 chunk 来源标题
-   ② chunk text 不足 → 用 agent 附带的 source excerpt（`> _Excerpt from source file:_`）
-   ③ excerpt 仍不够 → 主动去 `source/` 目录下读取对应源文件，**使用相对路径**：`Read(<skill_dir>/source/<相对路径>)`，不要使用绝对路径
-   ④ 源文件也找不到 → 明确告知用户无法从文档中获取答案
+   ① The chunk text returned by the agent (the `text` field) is sufficient -> answer directly, citing the chunk source title
+   ② Chunk text insufficient -> use the source excerpt included by the agent (`> _Excerpt from source file:_`)
+   ③ Excerpt still insufficient -> read the corresponding source file under the `source/` directory, **using a relative path**: `Read(<skill_dir>/source/<relative path>)`; do not use absolute paths
+   ④ Source file not found either -> clearly tell the user the answer cannot be obtained from the documents
    ```
 
-   **提示**：如果 chunk excerpt 信噪比低，可重新搜索（换关键词/增 `--top`）提高召回率，不要第一时间去翻源文件。
+   **Tip**: if the chunk excerpt has a low signal-to-noise ratio, re-search (change keywords / increase `--top`) to improve recall; do not go straight to the source file.
 
-## 配置（config.yaml）
+## Configuration (config.yaml)
 
-所有文档相关的配置集中在 `<skill_dir>/config.yaml`：
+All document-related configuration is centralized in `<skill_dir>/config.yaml`:
 
-- **`models`** — 嵌入模型和重排序模型的默认选择及可用列表。
-  - `models.dense.default`: 默认嵌入模型（`bge-base-en-v1.5`），可用构建 `--model` 参数临时切换
-  - `models.cross_encoder.default`: 默认重排序模型（`cross-encoder-ms-marco-MiniLM-L-6-v2`），仅通过 config.yaml 修改
-- **`soc_to_datasheet`** — SoC 名称到 Datasheet 编号的映射，用于对比查询和规格查询。
-- **`doc_type_rules`** — 文档类型分类规则（通过子路径关键词匹配）。
-- **`weight_rules`** — 文档权重规则，影响召回排序。
-- **`collection_map`** — 文档类型到 ChromaDB 集合名称的映射。
-- **`query_expansions`** — 查询同义词扩展映射表。
-- **`spec_feature_keywords`** — SoC 规格表特征关键词。
+- **`models`** — default and available embedding and reranking models.
+  - `models.dense.default`: default embedding model (`bge-base-en-v1.5`); can be temporarily switched with the build `--model` parameter
+  - `models.cross_encoder.default`: default reranking model (`cross-encoder-ms-marco-MiniLM-L6-v2`); change only via config.yaml
+- **`soc_to_datasheet`** — SoC name to datasheet number mapping, used for comparison and spec queries.
+- **`doc_type_rules`** — document type classification rules (matched by subpath keywords).
+- **`weight_rules`** — document weight rules, affecting recall ranking.
+- **`collection_map`** — document type to ChromaDB collection name mapping.
+- **`query_expansions`** — query synonym expansion table.
+- **`spec_feature_keywords`** — SoC spec table feature keywords.
 
-新增 SoC 或调整分类规则只需修改 `config.yaml`，无需改动代码。
+To add a new SoC or adjust classification rules, just edit `config.yaml` — no code changes needed.
 
-### 修改默认模型
+### Change the default model
 
-编辑 `config.yaml`，更改 `models.dense.default`：
+Edit `config.yaml` and change `models.dense.default`:
 ```yaml
 models:
   dense:
-    default: gte-base-en-v1.5    # 改为你需要的模型名
+    default: gte-base-en-v1.5    # change to the model name you need
 ```
 
-### 构建时临时切换（不修改 config.yaml）
+### Switch temporarily at build time (without editing config.yaml)
 
 ```bash
 python3 -m scripts.build.run --model all-MiniLM-L6-v2
 ```
 
-## 搜索优化
+## Search optimizations
 
-- **混合检索**：`hybrid=True` 时，BM25 关键词检索与密集向量检索互补。对于包含十六进制错误码的查询，系统自动检测并为匹配的 BM25 结果加权提升，确保错误码查询优先命中含错误码的参考表格。
-- **查询扩展**：领域同义词自动扩展（如 `errcode` → `errcode, error_code, error id` 等）。
-- **过滤低价值内容**：寄存器转储、十六进制密集行、"Table N" 纯标题等低信息量内容自动过滤。
-- **BM25 持久化缓存**：BM25 索引在首次搜索时从 ChromaDB 重建并缓存为 `.chroma_esp32_all/_bm25_cache.pkl`（~50MB），后续搜索直接加载缓存（~1s）。索引更新时自动增量刷新缓存。缓存加载时自动校验文档数量一致性，不一致则重建（解决缓存过期问题）。
-- **XLSX 空行过滤**：XLSX 表格处理时自动过滤全空行和纯装饰行（如 `---|---|---`），减少无效分块。
-- **对比查询**：自动检测 "esp32-s3 vs esp32" 这类对比查询，直接从 spec_summary 集合提取结构化规格数据进行对比。
+- **Hybrid retrieval**: when `hybrid=True`, BM25 keyword retrieval complements dense vector retrieval. For queries containing hexadecimal error codes, the system automatically detects them and boosts matching BM25 results, ensuring error-code queries prioritize reference tables containing error codes.
+- **Query expansion**: domain synonyms are expanded automatically (e.g. `errcode` -> `errcode, error_code, error id`).
+- **Low-value content filtering**: register dumps, hex-dense lines, bare "Table N" headings and other low-information content are filtered out automatically.
+- **BM25 persistent cache**: the BM25 index is rebuilt from ChromaDB on first search and cached as `.chroma_esp32_all/_bm25_cache.pkl` (~50MB); subsequent searches load the cache directly (~1s). The cache is refreshed incrementally when the index is updated. On load, the cache validates document-count consistency and rebuilds if inconsistent (solving the stale-cache problem).
+- **XLSX blank-row filtering**: when processing XLSX tables, all-empty rows and pure decoration rows (e.g. `---|---|---`) are filtered out, reducing invalid chunks.
+- **Comparison queries**: queries like "esp32-s3 vs esp32" are detected automatically, and structured spec data is extracted directly from the `spec_summary` collection for comparison.
 
-## 重要规则
+## Important rules
 
-- **不要在技能正常执行期间重建 RAG 索引**。索引必须已存在。
-- 所有回答必须**只**基于检索到的文档内容。
-- 如果无法从文档中找到答案，明确说明。
-- 访问源文件时**必须使用 `<skill_dir>/source/` 相对路径**，不要使用绝对路径。
-- 对于跨文档对比查询（如 "esp32 和 esp32-s3 的区别"），**必须**使用 `--compare` 标志：`python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"`。不要做普通搜索，否则返回的是零散段落而非完整对比。
-- 错误码查询建议提取关键十六进制值与模块名称组合搜索，效果最佳。注意：RAG 引擎的 BM25 十六进制提升机制会自动优先匹配含错误码的参考表格（类型为 `docs`），无需指定 `--type`。
-- **强制重建索引后必须删除 BM25 缓存**：如果重建索引时 `.chroma_esp32_all/` 目录未清空（例如仅删除了 `chroma.sqlite3` 而未删除整个目录），BM25 缓存文件 `_bm25_cache.pkl` 可能残留。该缓存基于 chunks 集合的文档 ID 构建，若 chunks 集合内容发生变化但缓存未更新，将导致 BM25 检索返回错误结果或空结果。解决方法：
+- **Do not rebuild the RAG index while the skill is running normally**. The index must already exist.
+- All answers must be based **only** on the retrieved document content.
+- If the answer cannot be found in the documents, state so clearly.
+- When accessing source files, **always use the `<skill_dir>/source/` relative path**; do not use absolute paths.
+- For cross-document comparison queries (e.g. "difference between esp32 and esp32-s3"), you **must** use the `--compare` flag: `python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"`. Do not do a plain search, otherwise you get scattered passages instead of a complete comparison.
+- For error-code queries, it is best to combine the key hexadecimal value with the module name. Note: the RAG engine's BM25 hex boosting automatically prioritizes reference tables containing error codes (type `docs`), so no `--type` is needed.
+- **After a forced index rebuild, you must delete the BM25 cache**: if the `.chroma_esp32_all/` directory was not emptied during the rebuild (e.g. only `chroma.sqlite3` was deleted but not the whole directory), the BM25 cache file `_bm25_cache.pkl` may remain. That cache is built from the document IDs of the chunks collection; if the chunks collection changes but the cache is not updated, BM25 retrieval will return wrong or empty results. Solution:
   ```bash
   rm -f <skill_dir>/.chroma_esp32_all/_bm25_cache.pkl
   ```
-  首次 `search()` 调用时将自动重建。
+  It will be rebuilt automatically on the first `search()` call.
 
-## 依赖
+## Dependencies
 
-Python 包（通过 `pip install -r requirements.txt` 安装）：
+Python packages (install via `pip install -r requirements.txt`):
 ```bash
 cd <skill_dir>
 pip install -r requirements.txt
 ```
 
-关键依赖：sentence-transformers, chromadb, PyMuPDF, rank-bm25, BeautifulSoup, markdownify, openpyxl。
+Key dependencies: sentence-transformers, chromadb, PyMuPDF, rank-bm25, BeautifulSoup, markdownify, openpyxl.
 
-## 目录结构
+## Directory structure
 
-- `<skill_dir>/source/` — 原始源文档（PDF, ZIP, XLSX），按 SoC 系列和文档类型组织
-- `<skill_dir>/.chroma_esp32_all/` — ChromaDB 密集向量索引（持久化，含 file_hash（MD5）跟踪 + BM25 缓存 `_bm25_cache.pkl`）
-- `<skill_dir>/config.yaml` — 文档分类、权重、SoC→Datasheet 映射等配置
-- `<skill_dir>/scripts/main.py` — RAG 引擎实现（索引构建、搜索、对比、十六进制提升、BM25 缓存）
-- `<skill_dir>/scripts/agent.py` — 一次性查询入口（单次 Bash 调用完成搜索+输出，避免多次权限询问）
-- `<skill_dir>/models/` — 本地离线模型
-  - `models/dense/` — 双编码器嵌入模型（bge-base-en-v1.5 为默认，可选 all-MiniLM-L6-v2、gte-base-en-v1.5、embeddinggemma-300m-npu）
-  - `models/cross-encoder/` — 交叉编码器重排序模型（cross-encoder-ms-marco-MiniLM-L-6-v2）
+- `<skill_dir>/source/` — raw source documents (PDF, ZIP, XLSX), organized by SoC series and document type
+- `<skill_dir>/.chroma_esp32_all/` — ChromaDB dense vector index (persisted, with file_hash (MD5) tracking + BM25 cache `_bm25_cache.pkl`)
+- `<skill_dir>/config.yaml` — document classification, weights, SoC->datasheet mapping, etc.
+- `<skill_dir>/scripts/main.py` — RAG engine implementation (index build, search, comparison, hex boosting, BM25 cache)
+- `<skill_dir>/scripts/agent.py` — one-shot query entry point (a single Bash call completes search + output, avoiding repeated permission prompts)
+- `<skill_dir>/models/` — local offline models
+  - `models/dense/` — bi-encoder embedding models (bge-base-en-v1.5 is the default; alternatives: all-MiniLM-L6-v2, gte-base-en-v1.5, embeddinggemma-300m-npu)
+  - `models/cross-encoder/` — cross-encoder reranking model (cross-encoder-ms-marco-MiniLM-L6-v2)
 
-## 构建/重建索引
+## Build/rebuild the index
 
-如果 `source/` 中的源文档更新了，需要重建 ChromaDB 索引：
+If the source documents in `source/` are updated, rebuild the ChromaDB index:
 
 ```bash
 cd <skill_dir>
-rm -f .chroma_esp32_all/_bm25_cache.pkl  # 清除可能失效的 BM25 缓存
-python3 -m scripts.build.run                     # 使用默认模型（bge-base-en-v1.5）
-python3 -m scripts.build.run --model gte-base-en-v1.5  # 使用指定模型构建
+rm -f .chroma_esp32_all/_bm25_cache.pkl  # clear the potentially stale BM25 cache
+python3 -m scripts.build.run                     # use the default model (bge-base-en-v1.5)
+python3 -m scripts.build.run --model gte-base-en-v1.5  # build with the specified model
 ```
 
-这将：
-1. **增量** — 按文件内容 MD5 与现有索引对比，只重新索引新增/变更/删除的文档
-2. **流式** — 逐文档处理（尤其 ZIP 文件：逐个提取内部子文件 → 分块 → 向量化 → 索引，完成后立即释放内存，不会将整个 ZIP 一次性加载到内存）
-3. **监控** — 每 10 分钟自动打印一次索引状态（文档数、chunk 数）
+This will:
+1. **Incremental** — compare file content MD5 against the existing index and only re-index added/changed/deleted documents
+2. **Streaming** — process one document at a time (especially ZIP files: extract each inner sub-file one by one -> chunk -> vectorize -> index, freeing memory immediately afterward, without loading the whole ZIP into memory at once)
+3. **Monitoring** — print index status (document count, chunk count) automatically every 10 minutes
 
-构建指定文件或目录：
+Build a specific file or directory:
 ```bash
 python3 -m scripts.build.run <path>
 ```
 
-从零开始全量重建：
+Full rebuild from scratch:
 ```bash
 rm -rf <skill_dir>/.chroma_esp32_all && python3 -m scripts.build.run
+```
