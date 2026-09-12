@@ -46,7 +46,7 @@ SCRIPTS_DIR = SKILL_DIR / 'scripts'
 sys.path.insert(0, str(SKILL_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-os.environ.setdefault('RAG_CHROMA_DIR', str(SKILL_DIR / '.chroma_db'))
+os.environ.setdefault('RAG_CHROMA_DIR', str(SKILL_DIR / '.chroma_esp32_all'))
 os.environ.setdefault('RAG_DOCS_DIR', str(SKILL_DIR / 'source'))
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['HF_HUB_OFFLINE'] = '1'

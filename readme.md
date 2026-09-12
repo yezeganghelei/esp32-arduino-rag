@@ -25,7 +25,7 @@
 │   │   └── embeddinggemma-300m-npu/               # Google Gemma 300M NPU优化
 │   └── cross-encoder/
 │       └── cross-encoder-ms-marco-MiniLM-L-6-v2/  # 88MB, 重排序模型
-├── source/                                        # 原始源文档（PDF, ZIP, XLSX）
+├── source/                                        # 原始源文档（PDF, ZIP, XLSX, DOCX, MD）
 │   ├── esp32-s3_datasheet_en.pdf                  # ESP32-S3 数据手册
 │   ├── esp32-s3_technical_reference_manual.pdf    # ESP32-S3 技术参考手册
 │   ├── esp32-s3_hardware_design_guidelines_en.pdf # 硬件设计指南
@@ -43,8 +43,8 @@
 本技能使用 **ChromaDB 密集向量检索 + BM25 混合融合 + 交叉编码器重排序** 的三段式检索路径：
 
 **流程**：
-1. **文档提取**：从 `source/` 读取 PDF/ZIP/XLSX 原始源文件
-2. **格式转换**：PDF→Markdown（PyMuPDF + 字体大小标题检测 + 表格感知提取），HTML→Markdown（BeautifulSoup + Markdownify），XLSX→Markdown（openpyxl pipe 表格，含空行和装饰行过滤）
+1. **文档提取**：从 `source/`（或 `RAG_DOCS_DIR` 指定的外部目录）读取 PDF/ZIP/XLSX/DOCX/Markdown 原始源文件
+2. **格式转换**：PDF→Markdown（PyMuPDF + 字体大小标题检测 + 表格感知提取），HTML→Markdown（BeautifulSoup + Markdownify），XLSX→Markdown（openpyxl pipe 表格，含空行和装饰行过滤），DOCX→Markdown，原生 Markdown 直读（自动剥离图片引用，保留代码块）
 3. **文本清洗**：去除页脚噪声、页码、"CONFIDENTIAL" 标记、孤立字符碎片
 4. **语义分块**：基于 Markdown 标题层次结构的语义分块（H1/H2 边界分段），段落智能合并/拆分，保护表格完整性
 5. **向量化**：使用 `bge-base-en-v1.5` 模型生成 768 维嵌入向量（可通过 config.yaml 切换模型或在构建时指定 `--model`）
@@ -169,7 +169,7 @@ SoC 名称到 Datasheet 编号的映射在 `config.yaml` 的 `soc_to_datasheet` 
 
 ```
 Phase 1: 文件清单扫描（纯 os.walk，<1 秒）
-  → 列出所有 .pdf/.zip/.xlsx 文件
+  → 列出所有 .pdf/.zip/.xlsx/.docx/.md 文件
   → 记录路径、doc_id（基于文件路径 hash）、mtime
 
 Phase 2: 对比旧索引，确定待处理列表
@@ -295,6 +295,36 @@ rm -rf .chroma_db && python3 -m scripts.build.run
 # 或：
 rm -rf .chroma_db/chroma.sqlite3 .chroma_db/_bm25_cache.pkl && python3 -m scripts.build.run
 ```
+
+### 6.4 构建外部语料库 / 独立数据库（Markdown 支持 + 目录排除）
+
+默认构建针对仓库内的 `source/` 目录。也可通过环境变量指向任意外部文档目录，并写入独立的向量库，避免与现有 `.chroma_db/` 混排而影响检索排名。
+
+环境变量：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `RAG_DOCS_DIR` | 源文档目录（递归扫描） | `<skill_dir>/source` |
+| `RAG_CHROMA_DIR` | ChromaDB 持久化目录 | `<skill_dir>/.chroma_db` |
+| `RAG_EXCLUDE_DIRS` | 排除路径（分号分隔的子串，大小写不敏感） | 空 |
+
+**支持的源文件格式**：`.pdf`、`.zip`、`.xlsx`、`.docx`、`.md`、`.markdown`。其中原生 Markdown 为直读，并自动剥离图片引用（`![alt](url)`、`![alt][ref]`）及 `<img>`/`<picture>`/`<source>` 标签；**不做** PDF 去噪清洗，以保留代码块与纯数字行等字面内容。
+
+**示例：将外部 ESP32 资料索引到独立数据库**（排除 SDK 源码树）：
+
+```powershell
+$env:RAG_DOCS_DIR="D:\01.亚马逊\ESP32\esp\ESP32"
+$env:RAG_CHROMA_DIR="D:\09.WorkSpace\esp-rag\.chroma_esp32_all"
+$env:RAG_EXCLUDE_DIRS="01. Software Code"
+.\.venv\Scripts\python.exe -m scripts.build.run
+```
+
+实测结果：233 篇文档 / 22,313 chunks（约 103 分钟），现有 `.chroma_db/` 未受影响。
+
+说明：
+- `RAG_EXCLUDE_DIRS` 按相对路径子串匹配，多个用 `;` 分隔，例如 `"01. Software Code;node_modules"`；仅影响清单扫描阶段，被排除的文件不会提取。
+- 查询独立库时，同样将 `RAG_CHROMA_DIR` 指向该目录（例如 `scripts/agent.py` 读取的 `RAG_CHROMA_DIR`）。
+- 再次执行相同命令即为增量更新：自动检测新增/变更/删除的文档，无需重建。
 
 ## 7. 配置（config.yaml）
 

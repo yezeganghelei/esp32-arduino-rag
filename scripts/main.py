@@ -2312,6 +2312,10 @@ def build_index(docs_dir: Optional[str] = None,
     docs_dir = docs_dir or _get_docs_root()
     chroma_dir = chroma_dir or _get_chroma_dir()
 
+    # Optional path exclusions (semicolon-separated substrings, case-insensitive)
+    exclude_dirs = [s.strip().lower() for s in
+                    os.environ.get('RAG_EXCLUDE_DIRS', '').split(';') if s.strip()]
+
     # ── Phase 1: quick inventory (file listing only, NO extraction) ──
     print(f"Scanning {docs_dir}...")
     inventory: List[dict] = []
@@ -2321,11 +2325,13 @@ def build_index(docs_dir: Optional[str] = None,
             if ext not in ('.pdf', '.zip', '.xlsx', '.docx', '.md', '.markdown'):
                 continue
             fpath = os.path.join(root, fname)
+            relpath = os.path.relpath(fpath, docs_dir)
+            if exclude_dirs and any(x in relpath.lower() for x in exclude_dirs):
+                continue
             try:
                 mtime = os.path.getmtime(fpath)
             except OSError:
                 mtime = 0
-            relpath = os.path.relpath(fpath, docs_dir)
             doc_id = hashlib.md5(fpath.encode()).hexdigest()[:12]
             inventory.append({
                 'id': doc_id,
