@@ -16,7 +16,7 @@ Commands:
 
 Paths are configurable via environment variables:
   RAG_DOCS_DIR     Source document directory (default: <project>/source)
-  RAG_CHROMA_DIR   ChromaDB persist directory (default: <project>/.chroma_db)
+  RAG_CHROMA_DIR   ChromaDB persist directory (default: <project>/.chroma_esp32_all)
   RAG_MD_DIR       Markdown output dir        (default: <project>/md)
 """
 import sys

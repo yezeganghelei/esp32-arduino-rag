@@ -32,7 +32,7 @@
 │   ├── esp-chip-errata-en-master-esp32s3.pdf      # 芯片 errata
 │   ├── ...                                        # 其他芯片/模块/开发板资料
 │   └── (按硬件资源、学习资源等目录组织)
-└── .chroma_db/                                    # ChromaDB 持久化向量数据库
+└── .chroma_esp32_all/                                    # ChromaDB 持久化向量数据库
     ├── chroma.sqlite3                             # ChromaDB 元数据存储
     ├── _bm25_cache.pkl                            # BM25 索引持久化缓存（~50MB）
     └── <uuid>/                                    # ChromaDB segment 目录
@@ -55,7 +55,7 @@
 ### 3.1 ChromaDB 多层索引——集合架构
 
 ```
-ChromaDB (.chroma_db/)
+ChromaDB (.chroma_esp32_all/)
 ├── chunks                   # 统一分块索引（主索引，向后兼容）
 ├── docs                     # 文档元数据索引（记录每个文档的摘要、分块列表、file_hash）
 ├── spec_summary             # 结构化规格参数索引（用于跨文档对比）
@@ -244,13 +244,13 @@ import pysqlite3
 import sys
 sys.modules['sqlite3'] = pysqlite3
 import os
-os.environ['RAG_CHROMA_DIR'] = '<skill_dir>/.chroma_db'
+os.environ['RAG_CHROMA_DIR'] = '<skill_dir>/.chroma_esp32_all'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['HF_HUB_OFFLINE'] = '1'
 sys.path.insert(0, '<skill_dir>/scripts')
 from main import ChromaIndex
 
-index = ChromaIndex('<skill_dir>/.chroma_db')
+index = ChromaIndex('<skill_dir>/.chroma_esp32_all')
 results = index.search("ESP32-S3 boot process", n_results=10, hybrid=True, rerank=True)
 ```
 
@@ -286,26 +286,26 @@ python3 -m scripts.build.run --model all-MiniLM-L6-v2
 ### 6.3 强制全量重建
 
 ```bash
-rm -rf .chroma_db && python3 -m scripts.build.run
+rm -rf .chroma_esp32_all && python3 -m scripts.build.run
 ```
 
-注意：仅删除 `.chroma_db/chroma.sqlite3` 但保留 `.chroma_db` 目录时，旧 `_bm25_cache.pkl` 可能残留并导致 BM25 返回错误结果。安全做法是删除整个 `.chroma_db/` 目录，或重建后手动删除缓存：
+注意：仅删除 `.chroma_esp32_all/chroma.sqlite3` 但保留 `.chroma_esp32_all` 目录时，旧 `_bm25_cache.pkl` 可能残留并导致 BM25 返回错误结果。安全做法是删除整个 `.chroma_esp32_all/` 目录，或重建后手动删除缓存：
 ```bash
-rm -rf .chroma_db && python3 -m scripts.build.run
+rm -rf .chroma_esp32_all && python3 -m scripts.build.run
 # 或：
-rm -rf .chroma_db/chroma.sqlite3 .chroma_db/_bm25_cache.pkl && python3 -m scripts.build.run
+rm -rf .chroma_esp32_all/chroma.sqlite3 .chroma_esp32_all/_bm25_cache.pkl && python3 -m scripts.build.run
 ```
 
 ### 6.4 构建外部语料库 / 独立数据库（Markdown 支持 + 目录排除）
 
-默认构建针对仓库内的 `source/` 目录。也可通过环境变量指向任意外部文档目录，并写入独立的向量库，避免与现有 `.chroma_db/` 混排而影响检索排名。
+默认构建针对仓库内的 `source/` 目录。也可通过环境变量指向任意外部文档目录，并写入独立的向量库，避免与现有 `.chroma_esp32_all/` 混排而影响检索排名。
 
 环境变量：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `RAG_DOCS_DIR` | 源文档目录（递归扫描） | `<skill_dir>/source` |
-| `RAG_CHROMA_DIR` | ChromaDB 持久化目录 | `<skill_dir>/.chroma_db` |
+| `RAG_CHROMA_DIR` | ChromaDB 持久化目录 | `<skill_dir>/.chroma_esp32_all` |
 | `RAG_EXCLUDE_DIRS` | 排除路径（分号分隔的子串，大小写不敏感） | 空 |
 
 **支持的源文件格式**：`.pdf`、`.zip`、`.xlsx`、`.docx`、`.md`、`.markdown`。其中原生 Markdown 为直读，并自动剥离图片引用（`![alt](url)`、`![alt][ref]`）及 `<img>`/`<picture>`/`<source>` 标签；**不做** PDF 去噪清洗，以保留代码块与纯数字行等字面内容。
@@ -319,7 +319,7 @@ $env:RAG_EXCLUDE_DIRS="01. Software Code"
 .\.venv\Scripts\python.exe -m scripts.build.run
 ```
 
-实测结果：233 篇文档 / 22,313 chunks（约 103 分钟），现有 `.chroma_db/` 未受影响。
+实测结果：233 篇文档 / 22,313 chunks（约 103 分钟）。
 
 说明：
 - `RAG_EXCLUDE_DIRS` 按相对路径子串匹配，多个用 `;` 分隔，例如 `"01. Software Code;node_modules"`；仅影响清单扫描阶段，被排除的文件不会提取。
@@ -425,7 +425,7 @@ opencode 的技能加载器在以下位置递归扫描 `**/SKILL.md`：
 
 ### 9.3 方式二：全局注册（任意目录可用）
 
-推荐用目录联接（junction）而非复制，避免 `.chroma_db/`、`models/`、`source/` 在磁盘上重复占用数百 MB：
+推荐用目录联接（junction）而非复制，避免 `.chroma_esp32_all/`、`models/`、`source/` 在磁盘上重复占用数百 MB：
 
 ```powershell
 # Windows (cmd)：在全局技能目录创建 junction 指向本仓库

@@ -20,7 +20,7 @@ def _build(target_path=None, model_name=None):
 
     # Derive paths from script location
     _SKILL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    CHROMA_DIR = os.environ.get('RAG_CHROMA_DIR', os.path.join(_SKILL_DIR, '.chroma_db'))
+    CHROMA_DIR = os.environ.get('RAG_CHROMA_DIR', os.path.join(_SKILL_DIR, '.chroma_esp32_all'))
     DOCS_DIR = os.environ.get('RAG_DOCS_DIR', os.path.join(_SKILL_DIR, 'source'))
 
     os.environ['RAG_DOCS_DIR'] = DOCS_DIR
@@ -157,7 +157,7 @@ if __name__ == '__main__':
     target = args.target
 
     _SKILL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    CHROMA_DIR = os.environ.get('RAG_CHROMA_DIR', os.path.join(_SKILL_DIR, '.chroma_db'))
+    CHROMA_DIR = os.environ.get('RAG_CHROMA_DIR', os.path.join(_SKILL_DIR, '.chroma_esp32_all'))
     DOCS_DIR = os.environ.get('RAG_DOCS_DIR', os.path.join(_SKILL_DIR, 'source'))
 
     t = threading.Thread(

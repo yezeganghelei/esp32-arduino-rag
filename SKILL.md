@@ -113,7 +113,7 @@ python3 -m scripts.build.run --model all-MiniLM-L6-v2
 - **混合检索**：`hybrid=True` 时，BM25 关键词检索与密集向量检索互补。对于包含十六进制错误码的查询，系统自动检测并为匹配的 BM25 结果加权提升，确保错误码查询优先命中含错误码的参考表格。
 - **查询扩展**：领域同义词自动扩展（如 `errcode` → `errcode, error_code, error id` 等）。
 - **过滤低价值内容**：寄存器转储、十六进制密集行、"Table N" 纯标题等低信息量内容自动过滤。
-- **BM25 持久化缓存**：BM25 索引在首次搜索时从 ChromaDB 重建并缓存为 `.chroma_db/_bm25_cache.pkl`（~50MB），后续搜索直接加载缓存（~1s）。索引更新时自动增量刷新缓存。缓存加载时自动校验文档数量一致性，不一致则重建（解决缓存过期问题）。
+- **BM25 持久化缓存**：BM25 索引在首次搜索时从 ChromaDB 重建并缓存为 `.chroma_esp32_all/_bm25_cache.pkl`（~50MB），后续搜索直接加载缓存（~1s）。索引更新时自动增量刷新缓存。缓存加载时自动校验文档数量一致性，不一致则重建（解决缓存过期问题）。
 - **XLSX 空行过滤**：XLSX 表格处理时自动过滤全空行和纯装饰行（如 `---|---|---`），减少无效分块。
 - **对比查询**：自动检测 "esp32-s3 vs esp32" 这类对比查询，直接从 spec_summary 集合提取结构化规格数据进行对比。
 
@@ -125,9 +125,9 @@ python3 -m scripts.build.run --model all-MiniLM-L6-v2
 - 访问源文件时**必须使用 `<skill_dir>/source/` 相对路径**，不要使用绝对路径。
 - 对于跨文档对比查询（如 "esp32 和 esp32-s3 的区别"），**必须**使用 `--compare` 标志：`python3 <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"`。不要做普通搜索，否则返回的是零散段落而非完整对比。
 - 错误码查询建议提取关键十六进制值与模块名称组合搜索，效果最佳。注意：RAG 引擎的 BM25 十六进制提升机制会自动优先匹配含错误码的参考表格（类型为 `docs`），无需指定 `--type`。
-- **强制重建索引后必须删除 BM25 缓存**：如果重建索引时 `.chroma_db/` 目录未清空（例如仅删除了 `chroma.sqlite3` 而未删除整个目录），BM25 缓存文件 `_bm25_cache.pkl` 可能残留。该缓存基于 chunks 集合的文档 ID 构建，若 chunks 集合内容发生变化但缓存未更新，将导致 BM25 检索返回错误结果或空结果。解决方法：
+- **强制重建索引后必须删除 BM25 缓存**：如果重建索引时 `.chroma_esp32_all/` 目录未清空（例如仅删除了 `chroma.sqlite3` 而未删除整个目录），BM25 缓存文件 `_bm25_cache.pkl` 可能残留。该缓存基于 chunks 集合的文档 ID 构建，若 chunks 集合内容发生变化但缓存未更新，将导致 BM25 检索返回错误结果或空结果。解决方法：
   ```bash
-  rm -f <skill_dir>/.chroma_db/_bm25_cache.pkl
+  rm -f <skill_dir>/.chroma_esp32_all/_bm25_cache.pkl
   ```
   首次 `search()` 调用时将自动重建。
 
@@ -144,7 +144,7 @@ pip install -r requirements.txt
 ## 目录结构
 
 - `<skill_dir>/source/` — 原始源文档（PDF, ZIP, XLSX），按 SoC 系列和文档类型组织
-- `<skill_dir>/.chroma_db/` — ChromaDB 密集向量索引（持久化，含 file_hash（MD5）跟踪 + BM25 缓存 `_bm25_cache.pkl`）
+- `<skill_dir>/.chroma_esp32_all/` — ChromaDB 密集向量索引（持久化，含 file_hash（MD5）跟踪 + BM25 缓存 `_bm25_cache.pkl`）
 - `<skill_dir>/config.yaml` — 文档分类、权重、SoC→Datasheet 映射等配置
 - `<skill_dir>/scripts/main.py` — RAG 引擎实现（索引构建、搜索、对比、十六进制提升、BM25 缓存）
 - `<skill_dir>/scripts/agent.py` — 一次性查询入口（单次 Bash 调用完成搜索+输出，避免多次权限询问）
@@ -158,7 +158,7 @@ pip install -r requirements.txt
 
 ```bash
 cd <skill_dir>
-rm -f .chroma_db/_bm25_cache.pkl  # 清除可能失效的 BM25 缓存
+rm -f .chroma_esp32_all/_bm25_cache.pkl  # 清除可能失效的 BM25 缓存
 python3 -m scripts.build.run                     # 使用默认模型（bge-base-en-v1.5）
 python3 -m scripts.build.run --model gte-base-en-v1.5  # 使用指定模型构建
 ```
@@ -175,4 +175,4 @@ python3 -m scripts.build.run <path>
 
 从零开始全量重建：
 ```bash
-rm -rf <skill_dir>/.chroma_db && python3 -m scripts.build.run
+rm -rf <skill_dir>/.chroma_esp32_all && python3 -m scripts.build.run

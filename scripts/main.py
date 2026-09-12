@@ -15,7 +15,7 @@ Usage (via CLI entry point):
 
 Environment:
   RAG_DOCS_DIR     Source document directory (default: <project>/source)
-  RAG_CHROMA_DIR   ChromaDB persist directory (default: <project>/.chroma_db)
+  RAG_CHROMA_DIR   ChromaDB persist directory (default: <project>/.chroma_esp32_all)
   RAG_MD_DIR       Markdown output dir        (default: <project>/md)
   RAG_KEEP_MD=1    Save intermediate Markdown files
 """
@@ -2265,7 +2265,7 @@ def _get_chroma_dir() -> str:
     env = os.environ.get('RAG_CHROMA_DIR')
     if env:
         return env
-    return os.path.join(_get_project_root(), ".chroma_db")
+    return os.path.join(_get_project_root(), ".chroma_esp32_all")
 
 
 def _get_md_dir() -> str:
@@ -2306,7 +2306,7 @@ def build_index(docs_dir: Optional[str] = None,
 
     WARNING: Full rebuild (incremental=False) will NOT delete existing
     chroma_dir — it only adds/updates from current source files.
-    To truly reset, delete .chroma_db/ manually.
+    To truly reset, delete .chroma_esp32_all/ manually.
     """
 
     docs_dir = docs_dir or _get_docs_root()
