@@ -403,6 +403,35 @@ def html_to_markdown(html_content: str) -> str:
     return md_text.strip()
 
 
+# ── Native Markdown ────────────────────────────────────────────────────────
+
+_MD_IMAGE_RE = re.compile(
+    r'!\[[^\]]*\]\([^)]*\)'
+    r'|!\[[^\]]*\]\[[^\]]*\]'
+    r'|<img\b[^>]*>'
+    r'|<picture\b[^>]*>|</picture\s*>'
+    r'|<source\b[^>]*>',
+    re.IGNORECASE,
+)
+
+
+def md_to_markdown(filepath: str) -> Optional[str]:
+    """Read a native Markdown file verbatim.
+
+    Image references (Markdown / HTML) are stripped so that picture assets
+    are not indexed. No PDF-style cleaning is applied so that code blocks
+    and literal content (e.g. numeric-only lines) are preserved.
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read()
+        text = _MD_IMAGE_RE.sub('', text).strip()
+        return text if text else None
+    except Exception as e:
+        print(f"  [SKIP] MD error {filepath}: {e}")
+        return None
+
+
 # ── ZIP extraction ─────────────────────────────────────────────────────────
 
 def extract_zip_markdown(filepath: str) -> Optional[str]:
@@ -706,7 +735,8 @@ def _classify_doc_type(relpath: str) -> str:
 
 
 def get_documents(base_dir: str):
-    """Walk base_dir, collect PDFs, ZIPs, and XLSXs, extract and clean Markdown.
+    """Walk base_dir, collect PDFs, ZIPs, XLSXs, DOCXs and Markdown files,
+    extract and clean Markdown.
 
     Generator: yields one document at a time to control memory pressure.
     """
@@ -725,6 +755,8 @@ def get_documents(base_dir: str):
                     text = xlsx_to_markdown(fpath)
                 elif ext == '.docx':
                     text = docx_to_markdown(fpath)
+                elif ext in ('.md', '.markdown'):
+                    text = md_to_markdown(fpath)
                 else:
                     continue
             except Exception as e:
@@ -732,7 +764,8 @@ def get_documents(base_dir: str):
                 del text
                 continue
             if text:
-                text = clean_extracted_text(text)
+                if ext not in ('.md', '.markdown'):
+                    text = clean_extracted_text(text)
                 if not text.strip():
                     continue
                 relpath = os.path.relpath(fpath, base_dir)
@@ -2285,7 +2318,7 @@ def build_index(docs_dir: Optional[str] = None,
     for root, _dirs, files in os.walk(docs_dir):
         for fname in sorted(files):
             ext = Path(fname).suffix.lower()
-            if ext not in ('.pdf', '.zip', '.xlsx', '.docx'):
+            if ext not in ('.pdf', '.zip', '.xlsx', '.docx', '.md', '.markdown'):
                 continue
             fpath = os.path.join(root, fname)
             try:
@@ -2560,6 +2593,8 @@ def get_documents_for_file(fpath: str, base_dir: str):
             text = xlsx_to_markdown(fpath)
         elif ext == '.docx':
             text = docx_to_markdown(fpath)
+        elif ext in ('.md', '.markdown'):
+            text = md_to_markdown(fpath)
         else:
             return
     except Exception as e:
@@ -2569,7 +2604,8 @@ def get_documents_for_file(fpath: str, base_dir: str):
     if not text:
         return
 
-    text = clean_extracted_text(text)
+    if ext not in ('.md', '.markdown'):
+        text = clean_extracted_text(text)
     if not text.strip():
         return
 
