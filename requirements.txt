@@ -1,5 +1,10 @@
 # ESP32 RAG skill dependencies
 # Install with: pip install -r requirements.txt
+#
+# Windows / Python 3.10 notes:
+#  - pysqlite3-binary omitted (no Windows wheel for the pin; built-in sqlite3 3.40.1 is enough)
+#  - Pillow pinned to a version with a cp310 Windows wheel (7.0.0 had none)
+#  - regex pinned to a version with a cp310 Windows wheel (2019.8.19 had none)
 
 # Core RAG pipeline
 sentence-transformers==3.2.1
@@ -24,9 +29,8 @@ scipy==1.10.1
 
 # Utilities
 tqdm==4.67.3
-pysqlite3-binary==0.5.4.post2
-Pillow==7.0.0
+Pillow==12.3.0
 filelock==3.16.1
 packaging==25.0
-regex==2019.8.19
+regex==2023.12.25
 typing-extensions==4.13.2
