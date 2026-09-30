@@ -56,6 +56,7 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
    - `--raw` : JSON lines output (machine-readable)
    - `--spec <name>` : look up structured spec data for a SoC (e.g. "esp32-s3")
    - `--compare <A,B>` : compare the specs of two SoCs (e.g. "esp32-s3,esp32")
+   - `--code` : query the **source-code database** instead of the documentation DB (uses `code.docs_dir` / `code.chroma_dir` from config.yaml). Combine with `--type code` to search code chunks only. Example: `python <skill_dir>/scripts/agent.py --code --type code "ledc pwm config"`.
 
    **Examples:**
    ```bash

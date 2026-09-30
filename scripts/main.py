@@ -47,6 +47,25 @@ except ImportError:
 _RERANKER = None
 _RERANKER_BATCH = 64
 
+# ── Code-query tuning ─────────────────────────────────────────────────────
+# When a query looks like source code (identifiers, calls, file extensions),
+# BM25 exact matching is far more reliable than the natural-language
+# cross-encoder, so we boost the BM25 component and down-weight reranking.
+# The weights themselves are configurable via `code.ce_weight` /
+# `code.bm25_weight` in config.yaml (see _code_ce_weight / _code_bm25_weight).
+
+_CODE_QUERY_PATTERNS = (
+    re.compile(r'\b[A-Za-z_]\w*_\w+'),                # snake_case / UPPER_SNAKE
+    re.compile(r'\b[a-z]+[A-Z]\w+'),                   # camelCase / mixedCase
+    re.compile(r'::|->|#include|\b\w+\s*\(\s*\)'),     # scope op, call, include
+    re.compile(r'\.(?:c|h|cpp|hpp|cc|cxx|ino|py)\b', re.IGNORECASE),
+)
+
+
+def _looks_like_code(query: str) -> bool:
+    """Heuristic: does the query contain code-like tokens (identifiers, etc.)?"""
+    return any(p.search(query) for p in _CODE_QUERY_PATTERNS)
+
 
 def _get_reranker():
     global _RERANKER
@@ -112,6 +131,107 @@ SPEC_FEATURE_KEYWORDS = _cfg.get('spec_feature_keywords',
 
 _MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
 
+# BM25 is skipped above this many chunks to bound memory; raise it via the
+# `bm25_max_chunks` key in config.yaml when the corpus is very large.
+_BM25_MAX_CHUNKS = int(_cfg.get('bm25_max_chunks', 300000))
+
+# ── Document extensions supported by the extraction pipeline ────────────
+_DOC_EXTS = {'.pdf', '.zip', '.xlsx', '.docx', '.md', '.markdown'}
+
+
+# ── Source-code indexing configuration (opt-in) ──────────────────────────
+
+def _code_config() -> dict:
+    return _cfg.get('code', {}) or {}
+
+
+def _code_ce_weight() -> float:
+    """Cross-encoder share of the final score for code-like queries."""
+    try:
+        return float(_code_config().get('ce_weight', 0.25))
+    except (TypeError, ValueError):
+        return 0.25
+
+
+def _code_bm25_weight() -> float:
+    """Normalized BM25 share for code-like queries."""
+    try:
+        return float(_code_config().get('bm25_weight', 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _code_dedup() -> bool:
+    """Whether to collapse identical code files (RAG_CODE_DEDUP=0 disables)."""
+    if os.environ.get('RAG_CODE_DEDUP') == '0':
+        return False
+    return bool(_code_config().get('dedup', True))
+
+
+def _code_enabled() -> bool:
+    """Code indexing is opt-in: RAG_INDEX_CODE=1 or config code.enabled=true."""
+    if os.environ.get('RAG_INDEX_CODE') == '1':
+        return True
+    return bool(_code_config().get('enabled', False))
+
+
+def _code_extensions() -> Set[str]:
+    if not _code_enabled():
+        return set()
+    exts = _code_config().get(
+        'extensions', ['.c', '.h', '.cpp', '.hpp', '.cc', '.cxx', '.ino', '.py', '.S'])
+    return {e.lower() for e in exts}
+
+
+def _code_exclude_dirs() -> List[str]:
+    if not _code_enabled():
+        return []
+    return [s.lower() for s in _code_config().get('exclude_dirs', []) if s]
+
+
+def _code_path_excluded(relpath: str, patterns: List[str]) -> bool:
+    """Segment-based exclusion for code paths.
+
+    Each pattern matches a whole path segment (case-insensitive); a trailing
+    ``*`` makes it a prefix match (e.g. ``espressif__*``). Unlike a raw
+    substring test this never drops a file just because its *name* contains
+    a library name (e.g. ``main/APP/lvgl_demo.c``).
+    """
+    segs = re.split(r'[\\/]+', relpath.lower())
+    for pat in patterns:
+        if pat.endswith('*'):
+            pre = pat[:-1]
+            if any(s.startswith(pre) for s in segs):
+                return True
+        elif any(s == pat for s in segs):
+            return True
+    return False
+
+
+def _get_code_dirs() -> Tuple[str, str]:
+    """Return (docs_dir, chroma_dir) for the code corpus.
+
+    Portability rules:
+      * RAG_DOCS_DIR env var wins (explicit per-machine override).
+      * otherwise `code.docs_dir` from config.yaml is used; a relative value
+        is resolved against the skill root so the corpus can ship inside the
+        skill (e.g. `docs_dir: source_code`).
+      * if neither is set, fall back to <skill_dir>/source_code when it exists.
+    chroma_dir is likewise resolved relative to the skill root when relative.
+    """
+    skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = _code_config()
+    docs_dir = os.environ.get('RAG_DOCS_DIR') or cfg.get('docs_dir') or ''
+    if not docs_dir:
+        bundled = os.path.join(skill_dir, 'source_code')
+        if os.path.isdir(bundled):
+            docs_dir = bundled
+    elif not os.path.isabs(docs_dir):
+        docs_dir = os.path.join(skill_dir, docs_dir)
+    chroma_dir = cfg.get('chroma_dir') or '.chroma_esp32_code'
+    if not os.path.isabs(chroma_dir):
+        chroma_dir = os.path.join(skill_dir, chroma_dir)
+    return docs_dir, chroma_dir
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -740,11 +860,13 @@ def get_documents(base_dir: str):
 
     Generator: yields one document at a time to control memory pressure.
     """
+    code_exts = _code_extensions()
     for root, _dirs, files in os.walk(base_dir):
         for fname in sorted(files):
             fpath = os.path.join(root, fname)
             ext = Path(fname).suffix.lower()
             tables_meta = None
+            is_code = False
             try:
                 if ext == '.pdf':
                     text, tables_meta = pdf_to_markdown(fpath, doc_type=_classify_doc_type(
@@ -757,6 +879,9 @@ def get_documents(base_dir: str):
                     text = docx_to_markdown(fpath)
                 elif ext in ('.md', '.markdown'):
                     text = md_to_markdown(fpath)
+                elif ext in code_exts:
+                    text = read_code_text(fpath)
+                    is_code = True
                 else:
                     continue
             except Exception as e:
@@ -764,14 +889,15 @@ def get_documents(base_dir: str):
                 del text
                 continue
             if text:
-                if ext not in ('.md', '.markdown'):
+                if not is_code and ext not in ('.md', '.markdown'):
                     text = clean_extracted_text(text)
                 if not text.strip():
                     continue
                 relpath = os.path.relpath(fpath, base_dir)
                 doc_id = hashlib.md5(fpath.encode()).hexdigest()[:12]
-                doc_type = _classify_doc_type(relpath)
-                weight = _classify_weight(relpath)
+                doc_type = 'code' if is_code else _classify_doc_type(relpath)
+                weight = (float(_code_config().get('weight', 2.0)) if is_code
+                          else _classify_weight(relpath))
                 yield {
                     'id': doc_id,
                     'path': relpath,
@@ -781,6 +907,7 @@ def get_documents(base_dir: str):
                     'weight': weight,
                     'doc_type': doc_type,
                     'title': Path(fname).stem,
+                    'is_code': is_code,
                 }
                 # free text as soon as the caller processes/receives the yielded doc
                 del text
@@ -1116,6 +1243,331 @@ def chunk_text(
             })
 
     return child_chunks
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 3b. Source-code extraction & function/class-aware chunking
+# ══════════════════════════════════════════════════════════════════════════════
+
+_C_LIKE_EXTS = {'.c', '.h', '.cpp', '.hpp', '.cc', '.cxx', '.ino', '.hxx', '.hh'}
+
+
+def read_code_text(filepath: str) -> Optional[str]:
+    """Read a source file as text, tolerating non-UTF-8 encodings.
+
+    Returns None for unreadable, oversized, or binary-looking files.
+    """
+    max_size = int(_code_config().get('max_file_size', 400000))
+    try:
+        with open(filepath, 'rb') as f:
+            raw = f.read(max_size + 1)
+    except OSError:
+        return None
+    if not raw or len(raw) > max_size:
+        return None
+    # Binary guard: NUL bytes in the head usually mean a non-text file.
+    if b'\x00' in raw[:4096]:
+        return None
+    text = None
+    for enc in ('utf-8-sig', 'utf-8', 'latin-1'):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = raw.decode('utf-8', errors='replace')
+    # Normalize line endings so chunk boundaries and output stay clean.
+    return text.replace('\r\n', '\n').replace('\r', '\n')
+
+
+def _scan_c_line(line: str, in_block: bool) -> Tuple[str, bool]:
+    """Strip C/C++ comments and string/char literals from one line.
+
+    Returns (code_without_comments, still_inside_block_comment).
+    """
+    out = []
+    i = 0
+    n = len(line)
+    while i < n:
+        if in_block:
+            j = line.find('*/', i)
+            if j == -1:
+                return ''.join(out), True
+            i = j + 2
+            in_block = False
+            continue
+        c = line[i]
+        if c == '/' and i + 1 < n and line[i + 1] == '*':
+            in_block = True
+            i += 2
+            continue
+        if c == '/' and i + 1 < n and line[i + 1] == '/':
+            break
+        if c in ('"', "'"):
+            quote = c
+            i += 1
+            while i < n:
+                if line[i] == '\\':
+                    i += 2
+                    continue
+                if line[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return ''.join(out), in_block
+
+
+_C_COMMENT_MARKERS = ('//', '/*', '*', '*/')
+_PY_COMMENT_MARKERS = ('#',)
+
+
+def _leading_comment_start(lines: List[str], idx: int,
+                           markers: Tuple[str, ...] = _C_COMMENT_MARKERS) -> int:
+    """Walk upward from idx across a contiguous comment block and blanks."""
+    j = idx
+    while j > 0 and not lines[j - 1].strip():
+        j -= 1
+    k = j
+    while k > 0:
+        s = lines[k - 1].strip()
+        if s.startswith(markers):
+            k -= 1
+        else:
+            break
+    return k
+
+
+def _split_c_like_units(text: str) -> List[dict]:
+    """Split C/C++/Arduino source into top-level function/class units."""
+    lines = text.split('\n')
+    n = len(lines)
+    code_lines: List[str] = []
+    in_block = False
+    for line in lines:
+        code, in_block = _scan_c_line(line, in_block)
+        code_lines.append(code)
+
+    units: List[dict] = []
+    skipped: List[Tuple[int, int]] = []
+    boundary = 0
+    pending_closers = 0  # closing braces of transparent containers (extern "C"/namespace)
+    i = 0
+    while i < n:
+        code = code_lines[i]
+        stripped = code.strip()
+        # Ignore the closing brace of a transparent container we stepped into.
+        if pending_closers > 0 and stripped.startswith('}'):
+            pending_closers -= 1
+            skipped.append((i, i))
+            i += 1
+            boundary = i
+            continue
+        if code.count('{') > 0:
+            header = '\n'.join(code_lines[boundary:i + 1]).strip()
+            # Transparent containers: keep scanning their contents as top level.
+            if re.match(r'^(namespace|extern)\b', header) and '(' not in header:
+                pending_closers += 1
+                i += 1
+                # keep boundary so the container header joins the next unit
+                continue
+            m = re.search(r'([A-Za-z_]\w*)\s*\(', header)
+            if m:
+                name = m.group(1)
+                kind = 'class' if re.search(r'\b(class|struct)\b', header) else 'function'
+            else:
+                name = ''
+                kind = 'block'
+            depth = 0
+            j = i
+            while j < n:
+                depth += code_lines[j].count('{') - code_lines[j].count('}')
+                if depth <= 0:
+                    break
+                j += 1
+            start = _leading_comment_start(lines, boundary) if name else boundary
+            units.append({'start': start, 'end': j, 'name': name, 'kind': kind})
+            i = j + 1
+            boundary = i
+            continue
+        # Preprocessor directives and complete statements end a pending region.
+        if stripped.startswith('#') or ';' in code:
+            boundary = i + 1
+        i += 1
+    if boundary < n:
+        units.append({'start': boundary, 'end': n - 1, 'name': '', 'kind': 'block'})
+    return _finalize_units(units, n, skipped)
+
+
+def _split_python_units(text: str) -> List[dict]:
+    """Split Python source into top-level function/class units using ast."""
+    import ast
+    lines = text.split('\n')
+    n = len(lines)
+    units: List[dict] = []
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return _split_indent_units(text)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            decos = [d.lineno for d in getattr(node, 'decorator_list', [])]
+            start = min([node.lineno] + decos) - 1
+            end = getattr(node, 'end_lineno', node.lineno) - 1
+            start = _leading_comment_start(lines, start, _PY_COMMENT_MARKERS)
+            kind = 'class' if isinstance(node, ast.ClassDef) else 'function'
+            units.append({'start': start, 'end': end, 'name': node.name, 'kind': kind})
+    return _finalize_units(units, n)
+
+
+def _split_indent_units(text: str) -> List[dict]:
+    """Fallback splitter for Python files that fail to parse (by top-level def)."""
+    lines = text.split('\n')
+    n = len(lines)
+    units: List[dict] = []
+    starts = []
+    for i, line in enumerate(lines):
+        if re.match(r'^(def|class|async\s+def)\s+\w+', line):
+            starts.append(i)
+    for si, s in enumerate(starts):
+        e = starts[si + 1] - 1 if si + 1 < len(starts) else n - 1
+        m = re.match(r'^(?:async\s+def|def|class)\s+(\w+)', lines[s])
+        name = m.group(1) if m else ''
+        kind = 'class' if lines[s].lstrip().startswith('class') else 'function'
+        units.append({'start': _leading_comment_start(lines, s, _PY_COMMENT_MARKERS),
+                      'end': e, 'name': name, 'kind': kind})
+    return _finalize_units(units, n)
+
+
+def _finalize_units(units: List[dict], n_lines: int,
+                    skipped: Optional[List[Tuple[int, int]]] = None) -> List[dict]:
+    """Sort units and fill the gaps between them so the file is fully covered.
+
+    Line ranges in `skipped` (e.g. container-closing braces) are never emitted.
+    """
+    skip = sorted(skipped or [])
+    units = sorted(units, key=lambda u: u['start'])
+    result: List[dict] = []
+
+    def _emit_gap(a: int, b: int):
+        cur = a
+        for s, e in skip:
+            if e < cur or s > b:
+                continue
+            if s > cur:
+                result.append({'start': cur, 'end': min(s - 1, b),
+                               'name': '', 'kind': 'block'})
+            cur = max(cur, e + 1)
+        if cur <= b:
+            result.append({'start': cur, 'end': b, 'name': '', 'kind': 'block'})
+
+    pos = 0
+    for u in units:
+        if u['start'] < pos:
+            u = dict(u, start=pos)
+        if u['start'] > pos:
+            _emit_gap(pos, u['start'] - 1)
+        result.append(u)
+        pos = max(pos, u['end'] + 1)
+    if pos < n_lines:
+        _emit_gap(pos, n_lines - 1)
+    return result
+
+
+def _split_code_block(text: str, max_size: int) -> List[str]:
+    """Split an oversized code block into <= max_size character pieces by line."""
+    if len(text) <= max_size:
+        return [text]
+    pieces: List[str] = []
+    buf: List[str] = []
+    size = 0
+    for ln in text.split('\n'):
+        if buf and size + len(ln) + 1 > max_size:
+            pieces.append('\n'.join(buf))
+            buf = []
+            size = 0
+        buf.append(ln)
+        size += len(ln) + 1
+    if buf:
+        pieces.append('\n'.join(buf))
+    return pieces
+
+
+def chunk_code(
+    text: str,
+    doc_id: str,
+    source: str,
+    doc_type: str = 'code',
+    doc_title: str = '',
+    weight: float = 2.0,
+) -> List[dict]:
+    """Function/class-aware chunking for source files.
+
+    Preserves each unit's signature and its leading comment block, and
+    prefixes chunks with file/function metadata so embeddings are
+    context-aware. Oversized units are split by line without dropping code.
+    """
+    cfg = _code_config()
+    max_size = int(cfg.get('chunk_size', CHUNK_SIZE))
+    ext = Path(source).suffix.lower()
+    if ext == '.py':
+        units = _split_python_units(text)
+    elif ext in _C_LIKE_EXTS:
+        units = _split_c_like_units(text)
+    else:
+        units = _finalize_units([], len(text.split('\n')))
+    lines = text.split('\n')
+
+    # Use the relative path (e.g. 02_key/main/main.c) as the file label so
+    # chunks are attributed to their example; fall back to the title/stem.
+    base_name = (source or doc_title or 'code').replace('\\', '/')
+    chunks: List[dict] = []
+    for u in units:
+        seg = '\n'.join(lines[u['start']:u['end'] + 1]).strip('\n')
+        if not seg.strip():
+            continue
+        prefix = f"File: {base_name}"
+        if u.get('name'):
+            prefix += f" | {u['kind'].capitalize()}: {u['name']}"
+        section = [u['name']] if u.get('name') else []
+        for piece in _split_code_block(seg, max_size):
+            if not piece.strip():
+                continue
+            cid = hashlib.md5(
+                f"{doc_id}:code:{u['start']}:{len(chunks)}".encode()).hexdigest()[:12]
+            chunks.append({
+                'id': cid,
+                'doc_id': doc_id,
+                'source': source,
+                'text': f"{prefix}\n\n{piece}",
+                'text_raw': piece,
+                'doc_type': doc_type,
+                'doc_title': doc_title or base_name,
+                'section_path': section,
+                'weight': weight,
+            })
+    return chunks
+
+
+def chunks_for_doc(doc: dict, doc_title: str = '') -> List[dict]:
+    """Route a document dict to the correct chunker (code vs. prose)."""
+    if doc.get('is_code'):
+        return chunk_code(
+            doc['text'], doc['id'], doc['path'],
+            doc_type=doc.get('doc_type', 'code'),
+            doc_title=doc_title,
+            weight=doc.get('weight', 2.0),
+        )
+    return chunk_text(
+        doc['text'], doc['id'], doc['path'],
+        doc_type=doc.get('doc_type', 'docs'),
+        doc_title=doc_title,
+        weight=doc.get('weight', 1.0),
+        tables_meta=doc.get('tables_meta'),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1666,7 +2118,7 @@ class ChromaIndex:
                 # the cache is stale and must be rebuilt.
                 cached_count = len(self._bm25_ids)
                 actual_count = self.chunks.count()
-                if cached_count != actual_count and actual_count > 0 and actual_count <= 200000:
+                if cached_count != actual_count and actual_count > 0 and actual_count <= _BM25_MAX_CHUNKS:
                     self._bm25 = None
                     self._bm25_ids = []
                 else:
@@ -1677,7 +2129,7 @@ class ChromaIndex:
         # Rebuild from ChromaDB
         try:
             total = self.chunks.count()
-            if total == 0 or total > 200000:
+            if total == 0 or total > _BM25_MAX_CHUNKS:
                 return
             all_docs = []
             all_ids = []
@@ -1764,6 +2216,7 @@ class ChromaIndex:
         self._ensure_bm25()
 
         expanded = expand_query(query)
+        code_query = _looks_like_code(query)
         q_emb = self._ef([expanded])[0]
 
         # Phase 1: collect candidates from dense vector search
@@ -1857,11 +2310,43 @@ class ChromaIndex:
 
             # Also inject any high BM25 results that dense missed
             seen_dense = {r['id'] for r in candidate_list}
-            for br in bm25_top[:n_results]:
+
+            # Code-like queries: BM25 exact match is the primary signal.
+            # Add a normalized BM25 component and inject BM25 hits dense missed.
+            if code_query and bm25_top:
+                top_bm25 = bm25_top[0]['score'] or 1.0
+                bm25_norm = {b['id']: b['score'] / top_bm25 for b in bm25_top}
+                for r in candidate_list:
+                    if r['id'] in bm25_norm:
+                        r['score'] += _code_bm25_weight() * bm25_norm[r['id']]
+                for br in bm25_top[:n_results]:
+                    if br['id'] in seen_dense:
+                        continue
+                    br_result = self.chunks.get(ids=[br['id']])
+                    br_text = br_result['documents'][0] if br_result.get('documents') else ''
+                    br_meta = br_result['metadatas'][0] if br_result.get('metadatas') else {}
+                    if doc_type and br_meta.get('doc_type') != doc_type:
+                        continue
+                    candidate_list.append({
+                        'id': br['id'],
+                        'text': br_text,
+                        'score': _code_bm25_weight() * bm25_norm.get(br['id'], 0.0),
+                        '_bm25_rank': br.get('_bm25_rank', 0),
+                        'source': br_meta.get('source', ''),
+                        'metadata': br_meta,
+                        'doc_type': br_meta.get('doc_type', 'docs'),
+                        'section_path': br_meta.get('section_path', ''),
+                        'doc_title': br_meta.get('doc_title', ''),
+                    })
+
+            for br in ([] if code_query else bm25_top[:n_results]):
                 if br['id'] not in seen_dense:
                     br_result = self.chunks.get(ids=[br['id']])
                     br_text = br_result['documents'][0] if br_result.get('documents') else ''
                     br_meta = br_result['metadatas'][0] if br_result.get('metadatas') else {}
+                    # Respect an explicit doc_type filter during BM25 injection
+                    if doc_type and br_meta.get('doc_type') != doc_type:
+                        continue
                     candidate_list.append({
                         'id': br['id'],
                         'text': br_text,
@@ -1887,6 +2372,9 @@ class ChromaIndex:
                         hc_result = self.chunks.get(ids=[hc_id])
                         hc_text = hc_result['documents'][0] if hc_result.get('documents') else ''
                         hc_meta = hc_result['metadatas'][0] if hc_result.get('metadatas') else {}
+                        # Respect an explicit doc_type filter during hex injection
+                        if doc_type and hc_meta.get('doc_type') != doc_type:
+                            continue
                         candidate_list.append({
                             'id': hc_id,
                             'text': hc_text,
@@ -1916,7 +2404,23 @@ class ChromaIndex:
                     )
                     for i, r in enumerate(candidate_list):
                         r['ce_score'] = float(ce_scores[i]) if i < len(ce_scores) else 0.0
-                    candidate_list.sort(key=lambda x: -x.get('ce_score', 0))
+                    if code_query:
+                        # Blend the normalized BM25-weighted fused score with
+                        # the cross-encoder score, keeping BM25 dominant for
+                        # code-like queries where the CE is unreliable.
+                        fused = [r.get('score', 0.0) for r in candidate_list]
+                        fmin, fmax = min(fused), max(fused)
+                        cmin, cmax = min(ce_scores), max(ce_scores)
+                        fspan = (fmax - fmin) or 1.0
+                        cspan = (cmax - cmin) or 1.0
+                        for r in candidate_list:
+                            fn = (r.get('score', 0.0) - fmin) / fspan
+                            cn = (r['ce_score'] - cmin) / cspan
+                            r['_blend'] = (_code_ce_weight() * cn
+                                           + (1.0 - _code_ce_weight()) * fn)
+                        candidate_list.sort(key=lambda x: -x.get('_blend', 0.0))
+                    else:
+                        candidate_list.sort(key=lambda x: -x.get('ce_score', 0))
                 except Exception:
                     pass  # fall back to current ordering
 
@@ -2041,13 +2545,7 @@ class ChromaIndex:
 
         # Chunk and re-add
         doc_title = doc.get('title', '') or _doc_title_from_text(doc['text'])
-        chunks = chunk_text(
-            doc['text'], doc['id'], doc['path'],
-            doc_type=doc.get('doc_type', 'docs'),
-            doc_title=doc_title,
-            weight=doc.get('weight', 1.0),
-            tables_meta=doc.get('tables_meta'),
-        )
+        chunks = chunks_for_doc(doc, doc_title)
 
         if chunks:
             self.add_chunks(chunks)
@@ -2315,18 +2813,24 @@ def build_index(docs_dir: Optional[str] = None,
     # Optional path exclusions (semicolon-separated substrings, case-insensitive)
     exclude_dirs = [s.strip().lower() for s in
                     os.environ.get('RAG_EXCLUDE_DIRS', '').split(';') if s.strip()]
+    code_exclude_dirs = _code_exclude_dirs()
+
+    allowed_exts = _DOC_EXTS | _code_extensions()
 
     # ── Phase 1: quick inventory (file listing only, NO extraction) ──
     print(f"Scanning {docs_dir}...")
     inventory: List[dict] = []
     for root, _dirs, files in os.walk(docs_dir):
+        _dirs.sort()  # deterministic order (stable dedup / progress)
         for fname in sorted(files):
             ext = Path(fname).suffix.lower()
-            if ext not in ('.pdf', '.zip', '.xlsx', '.docx', '.md', '.markdown'):
+            if ext not in allowed_exts:
                 continue
             fpath = os.path.join(root, fname)
             relpath = os.path.relpath(fpath, docs_dir)
             if exclude_dirs and any(x in relpath.lower() for x in exclude_dirs):
+                continue
+            if code_exclude_dirs and _code_path_excluded(relpath, code_exclude_dirs):
                 continue
             try:
                 mtime = os.path.getmtime(fpath)
@@ -2339,6 +2843,33 @@ def build_index(docs_dir: Optional[str] = None,
                 'source': fpath,
                 'mtime': mtime,
             })
+
+    # ── Content dedup for code files ─────────────────────────────────
+    # Board-support (BSP) drivers are copied into every example, so the
+    # same file (e.g. led.c) appears dozens of times. Keep only the first
+    # copy of identical content so duplicates don't flood retrieval.
+    if _code_enabled() and _code_dedup():
+        code_exts = _code_extensions()
+        seen_hashes: Dict[str, str] = {}
+        deduped: List[dict] = []
+        dup_count = 0
+        for entry in inventory:
+            if Path(entry['source']).suffix.lower() in code_exts:
+                try:
+                    with open(entry['source'], 'rb') as _f:
+                        h = hashlib.md5(_f.read()).hexdigest()
+                except OSError:
+                    h = None
+                if h is not None:
+                    if h in seen_hashes:
+                        dup_count += 1
+                        continue
+                    seen_hashes[h] = entry['path']
+            deduped.append(entry)
+        inventory = deduped
+        if dup_count:
+            print(f"Deduplicated {dup_count} identical code files")
+
     total = len(inventory)
     print(f"Found {total} accessible documents")
 
@@ -2440,13 +2971,7 @@ def build_index(docs_dir: Optional[str] = None,
                 if spec_data:
                     index.add_specs(doc['id'], doc_title, spec_data['specs'])
 
-            chunks = chunk_text(
-                doc['text'], doc['id'], doc['path'],
-                doc_type=doc.get('doc_type', 'docs'),
-                doc_title=doc_title,
-                weight=doc.get('weight', 1.0),
-                tables_meta=doc.get('tables_meta'),
-            )
+            chunks = chunks_for_doc(doc, doc_title)
             if keep_md:
                 _write_md_file(doc['path'], doc['text'])
 
@@ -2589,6 +3114,7 @@ def get_documents_for_file(fpath: str, base_dir: str):
 
     ext = Path(fpath).suffix.lower()
     tables_meta = None
+    is_code = False
     try:
         if ext == '.pdf':
             text, tables_meta = pdf_to_markdown(fpath, doc_type=_classify_doc_type(os.path.relpath(fpath, base_dir)))
@@ -2601,6 +3127,9 @@ def get_documents_for_file(fpath: str, base_dir: str):
             text = docx_to_markdown(fpath)
         elif ext in ('.md', '.markdown'):
             text = md_to_markdown(fpath)
+        elif ext in _code_extensions():
+            text = read_code_text(fpath)
+            is_code = True
         else:
             return
     except Exception as e:
@@ -2610,15 +3139,16 @@ def get_documents_for_file(fpath: str, base_dir: str):
     if not text:
         return
 
-    if ext not in ('.md', '.markdown'):
+    if not is_code and ext not in ('.md', '.markdown'):
         text = clean_extracted_text(text)
     if not text.strip():
         return
 
     relpath = os.path.relpath(fpath, base_dir)
     doc_id = hashlib.md5(fpath.encode()).hexdigest()[:12]
-    doc_type = _classify_doc_type(relpath)
-    weight = _classify_weight(relpath)
+    doc_type = 'code' if is_code else _classify_doc_type(relpath)
+    weight = (float(_code_config().get('weight', 2.0)) if is_code
+              else _classify_weight(relpath))
     yield {
         'id': doc_id,
         'path': relpath,
@@ -2628,6 +3158,7 @@ def get_documents_for_file(fpath: str, base_dir: str):
         'weight': weight,
         'doc_type': doc_type,
         'title': Path(fpath).stem,
+        'is_code': is_code,
     }
 
     # NOTE: pbar is only defined in build_index() context, not when

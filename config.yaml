@@ -6,6 +6,45 @@ chunk_size: 1200
 min_chunk: 300
 batch_size: 5
 
+# BM25 hybrid retrieval is skipped above this many chunks (memory guard).
+# Raised for the large source-code corpus.
+bm25_max_chunks: 300000
+
+# ── Source-code indexing (opt-in, separate corpus / database) ───────
+# Enable by setting RAG_INDEX_CODE=1 in the environment or enabled: true.
+# Recommended: build into a SEPARATE ChromaDB dir so code does not affect
+# the documentation retrieval ranking.
+code:
+  enabled: false
+  extensions: [.c, .h, .cpp, .hpp, .cc, .cxx, .ino, .py, .S]
+  # Directory segments excluded when scanning a code corpus (case-insensitive,
+  # whole path segment; a trailing * = prefix match). Excludes third-party
+  # libraries; KEEPS the examples' own code and the board `components/BSP`
+  # drivers.
+  exclude_dirs: [build, .git, managed_components, .venv, node_modules,
+                 espressif__*, tinyusb_src, esp32-camera, decoder_ijg,
+                 MJPEG, LVGL, led_strip]
+  # Collapse identical code files (BSP drivers are copied per example).
+  # false = keep every copy (all remaining example code imported).
+  dedup: false
+  max_file_size: 400000        # skip files larger than this many bytes
+  chunk_size: 1200             # max chars per code chunk (split oversized units)
+  min_chunk: 120
+  weight: 2.0                  # search weight for code chunks
+  # Code-like query tuning: for identifier/call/file queries, BM25 exact
+  # matching beats the natural-language cross-encoder, so we blend the two.
+  # ce_weight: cross-encoder share (0..1); bm25_weight: normalized BM25 share.
+  ce_weight: 0.25
+  bm25_weight: 1.0
+  # Corpus root + DB dir for the code build and `agent.py --code`.
+  #   docs_dir : point this at YOUR local code corpus. Absolute or relative
+  #              (relative is resolved against the skill dir). The
+  #              RAG_DOCS_DIR env var overrides it at runtime, so each machine
+  #              can keep the corpus wherever it likes.
+  #   chroma_dir : where the code vector DB lives (relative to skill dir).
+  docs_dir: "D:\\01.亚马逊\\ESP32\\esp\\ESP32\\01. Software Code"
+  chroma_dir: ".chroma_esp32_code"
+
 # Model configuration
 models:
   dense:
@@ -84,6 +123,7 @@ collection_map:
   safety: safety_chunks
   release_notes: release_chunks
   specification: spec_chunks
+  code: code_chunks
   docs: docs_chunks
 
 # Query synonym expansion (query expansion)

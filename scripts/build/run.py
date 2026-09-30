@@ -11,6 +11,43 @@ Usage:
 import sys, os, time, threading, argparse
 
 
+def _resolve_dirs():
+    """Resolve (docs_dir, chroma_dir) for a build.
+
+    Precedence: explicit RAG_DOCS_DIR/RAG_CHROMA_DIR env vars, then — when
+    code indexing is enabled (RAG_INDEX_CODE=1 or config code.enabled) — the
+    `code.docs_dir` / `code.chroma_dir` defaults from config.yaml, then the
+    documentation defaults (`source/` and `.chroma_esp32_all/`).
+    """
+    skill = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    docs = os.environ.get('RAG_DOCS_DIR')
+    chroma = os.environ.get('RAG_CHROMA_DIR')
+    if not docs or not chroma:
+        try:
+            import yaml
+            with open(os.path.join(skill, 'config.yaml'), encoding='utf-8') as f:
+                cfg = yaml.safe_load(f) or {}
+            code = cfg.get('code', {}) or {}
+            if code.get('enabled', False) or os.environ.get('RAG_INDEX_CODE') == '1':
+                if not docs and code.get('docs_dir'):
+                    docs = code['docs_dir']
+                    if not os.path.isabs(docs):
+                        docs = os.path.join(skill, docs)
+                if not chroma:
+                    cd = code.get('chroma_dir') or '.chroma_esp32_code'
+                    chroma = cd if os.path.isabs(cd) else os.path.join(skill, cd)
+                # portable default: a corpus bundled inside the skill
+                if not docs:
+                    bundled = os.path.join(skill, 'source_code')
+                    if os.path.isdir(bundled):
+                        docs = bundled
+        except Exception:
+            pass
+    docs = docs or os.path.join(skill, 'source')
+    chroma = chroma or os.path.join(skill, '.chroma_esp32_all')
+    return docs, chroma
+
+
 def _build(target_path=None, model_name=None):
     try:
         import pysqlite3
@@ -18,16 +55,15 @@ def _build(target_path=None, model_name=None):
     except ImportError:
         pass  # fall back to built-in sqlite3 (3.40.1, sufficient for chromadb)
 
-    # Derive paths from script location
     _SKILL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    CHROMA_DIR = os.environ.get('RAG_CHROMA_DIR', os.path.join(_SKILL_DIR, '.chroma_esp32_all'))
-    DOCS_DIR = os.environ.get('RAG_DOCS_DIR', os.path.join(_SKILL_DIR, 'source'))
+    DOCS_DIR, CHROMA_DIR = _resolve_dirs()
 
     os.environ['RAG_DOCS_DIR'] = DOCS_DIR
     os.environ['RAG_CHROMA_DIR'] = CHROMA_DIR
 
     sys.path.insert(0, os.path.join(_SKILL_DIR, 'scripts'))
-    from scripts.main import ChromaIndex, get_documents_for_file, chunk_text, build_index
+    from scripts.main import (ChromaIndex, get_documents_for_file, get_documents,
+                              chunks_for_doc, build_index)
 
     start_time = time.time()
 
@@ -39,8 +75,9 @@ def _build(target_path=None, model_name=None):
         total_to_index = None
 
         if os.path.isdir(target_path):
-            from scripts.main import get_documents
-            total_to_index = sum(1 for _ in get_documents(target_path))
+            # Count files cheaply (no extraction) to avoid parsing everything twice
+            total_to_index = sum(
+                len(fs) for _r, _d, fs in os.walk(target_path))
             doc_gen = get_documents(target_path)
         else:
             doc_gen = get_documents_for_file(target_path, os.path.dirname(target_path))
@@ -53,12 +90,7 @@ def _build(target_path=None, model_name=None):
             except Exception:
                 pass
 
-            chunks = chunk_text(
-                doc['text'], doc['id'], doc['path'],
-                doc_type=doc.get('doc_type', 'docs'),
-                doc_title=doc_title,
-                weight=doc.get('weight', 1.0),
-            )
+            chunks = chunks_for_doc(doc, doc_title)
 
             chunk_count = 0
             if chunks:
@@ -156,9 +188,7 @@ if __name__ == '__main__':
 
     target = args.target
 
-    _SKILL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    CHROMA_DIR = os.environ.get('RAG_CHROMA_DIR', os.path.join(_SKILL_DIR, '.chroma_esp32_all'))
-    DOCS_DIR = os.environ.get('RAG_DOCS_DIR', os.path.join(_SKILL_DIR, 'source'))
+    DOCS_DIR, CHROMA_DIR = _resolve_dirs()
 
     t = threading.Thread(
         target=_monitor, args=(DOCS_DIR, CHROMA_DIR), daemon=True

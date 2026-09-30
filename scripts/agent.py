@@ -14,6 +14,7 @@ Options:
     --raw              JSON lines output (machine-readable)
     --spec <name>      Look up structured spec data for named SoC
     --compare <A,B>    Compare two SoCs by name
+    --code             Query the source-code database (config.yaml `code:`)
 
 Environment:
     RAG_CHROMA_DIR  — ChromaDB persist directory
@@ -57,20 +58,58 @@ for name in ['chromadb.segment.impl.metadata', 'chromadb.segment.impl.vector',
              'chromadb.telemetry', 'chromadb.rate_limiting']:
     logging.getLogger(name).setLevel(logging.ERROR)
 
-from main import ChromaIndex, query as rag_query, _format_comparison, SOC_TO_DATASHEET
+from main import (ChromaIndex, query as rag_query, _format_comparison,
+                  SOC_TO_DATASHEET, _get_code_dirs)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Source file reading (for deeper context when chunk text is insufficient)
 # ═══════════════════════════════════════════════════════════════════════
 
+def _source_roots() -> List[Path]:
+    """Candidate source roots, most specific first.
+
+    The DB stores *relative* paths, so the only thing that varies per machine
+    is the source root. Try the configured RAG_DOCS_DIR first, then the
+    portable defaults that ship inside the skill.
+    """
+    roots: List[Path] = []
+    env = os.environ.get('RAG_DOCS_DIR')
+    if env:
+        roots.append(Path(env))
+    roots.append(SKILL_DIR / 'source')
+    roots.append(SKILL_DIR / 'source_code')
+    seen = set()
+    out: List[Path] = []
+    for r in roots:
+        key = str(r).lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 def resolve_source_path(relpath: str) -> Path:
-    docs_dir = os.environ['RAG_DOCS_DIR']
-    candidate = Path(docs_dir) / relpath
-    if candidate.exists():
-        return candidate
-    for f in Path(docs_dir).rglob(relpath):
-        return f
-    return candidate
+    # Normalize separators so a Windows-built index resolves on Linux too.
+    parts = [p for p in re.split(r'[\\/]+', relpath) if p]
+    for root in _source_roots():
+        if not parts:
+            break
+        candidate = root.joinpath(*parts)
+        if candidate.exists():
+            return candidate
+    # Fallback: locate the file by name anywhere under the roots.
+    if parts:
+        name = parts[-1]
+        for root in _source_roots():
+            if root.is_dir():
+                try:
+                    for f in root.rglob(name):
+                        return f
+                except Exception:
+                    pass
+    roots = _source_roots()
+    base = roots[0] if roots else Path('.')
+    return base.joinpath(*parts) if parts else base
 
 
 def read_source_file(relpath: str, max_chars: int = 3000) -> str:
@@ -191,12 +230,15 @@ def main():
     doc_type = None
     spec_name = None
     compare_names = None
+    code_mode = False
     query_parts = []
 
     i = 0
     while i < len(args):
         if args[i] == '--raw':
             raw = True
+        elif args[i] == '--code':
+            code_mode = True
         elif args[i] == '--top' and i + 1 < len(args):
             top_n = int(args[i + 1])
             i += 1
@@ -214,6 +256,14 @@ def main():
         i += 1
 
     query_text = ' '.join(query_parts).strip()
+
+    if code_mode:
+        code_docs, code_chroma = _get_code_dirs()
+        if code_docs:
+            os.environ['RAG_DOCS_DIR'] = code_docs
+        os.environ['RAG_CHROMA_DIR'] = code_chroma
+        if doc_type is None:
+            doc_type = 'code'
 
     chroma_dir = os.environ['RAG_CHROMA_DIR']
     index = ChromaIndex(chroma_dir)

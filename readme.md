@@ -1,6 +1,6 @@
 # ESP32 RAG Skill — Index Building and Retrieval Engine
 
-> **Note**: AI retrieval is sourced from the `ESP32` materials folder (excluding `01.Software Code`). To ensure answer accuracy, it strictly follows the original descriptions in the source documents and cites the content sources, with no AI speculation!
+> **Note**: AI retrieval is sourced from the `ESP32` materials folder (documentation). Source code under `01.Software Code` can additionally be indexed into a **separate** database (see §6.5). To ensure answer accuracy, retrieval strictly follows the original descriptions in the source documents and cites the content sources, with no AI speculation!
 
 ## 1. Overview
 
@@ -11,32 +11,35 @@ Skill directory structure:
 ```
 <skill_dir>/
 ├── SKILL.md                                       # Skill definition (including Workflow instructions)
+├── readme.md                                      # This document
 ├── config.yaml                                    # Document classification, weights, models, SoC→Datasheet mapping, etc.
+├── opencode.json                                  # Skill registration (skills.paths points at this repo)
 ├── requirements.txt                               # Python dependency list
 ├── scripts/
 │   ├── main.py                                    # ChromaDB RAG engine (core implementation)
 │   ├── agent.py                                   # One-shot query entry point (single Bash call, avoids repeated permission prompts)
-│   ├── build/
-│   │   └── run.py                                 # Index build entry script (supports the --model parameter)
-│   └── __init__.py
+│   ├── pre-build.sh.bak                           # Legacy build script backup
+│   ├── __init__.py
+│   └── build/
+│       ├── run.py                                 # Index build entry script (supports the --model parameter)
+│       └── __init__.py
 ├── models/                                        # Self-contained model files (usable offline)
 │   ├── dense/
-│   │   ├── bge-base-en-v1.5/                      # 419MB, 768-dim, default embedding model
-│   │   ├── all-MiniLM-L6-v2/                      # 88MB, 384-dim, lightweight alternative
-│   │   ├── gte-base-en-v1.5/                      # GTE base 768-dim
-│   │   └── embeddinggemma-300m-npu/               # Google Gemma 300M NPU-optimized
+│   │   ├── bge-base-en-v1.5/                      # ~1.2GB, 768-dim, default embedding model
+│   │   ├── all-MiniLM-L6-v2/                      # ~0.9GB, 384-dim, lightweight alternative
+│   │   ├── gte-base-en-v1.5/                      # ~2.0GB, GTE base 768-dim
+│   │   └── embeddinggemma-300m-npu/               # ~0.9GB, Google Gemma 300M NPU-optimized
 │   └── cross-encoder/
-│       └── cross-encoder-ms-marco-MiniLM-L-6-v2/  # 88MB, reranking model
+│       └── cross-encoder-ms-marco-MiniLM-L-6-v2/  # ~0.85GB, reranking model
 ├── source/                                        # Raw source documents (PDF, ZIP, XLSX, DOCX, MD)
-│   ├── esp32-s3_datasheet_en.pdf                  # ESP32-S3 datasheet
-│   ├── esp32-s3_technical_reference_manual.pdf    # ESP32-S3 technical reference manual
-│   ├── esp32-s3_hardware_design_guidelines_en.pdf # Hardware design guidelines
-│   ├── esp-chip-errata-en-master-esp32s3.pdf      # Chip errata
-│   ├── ...                                        # Other chip/module/dev-board materials
-│   └── (organized by hardware resources, learning resources, etc.)
-└── .chroma_esp32_all/                             # ChromaDB persisted vector database
+│   └── (empty by default; corpus pointed to via RAG_DOCS_DIR / code.docs_dir)
+├── .chroma_esp32_all/                             # ChromaDB persisted vector database (documentation)
+│   ├── chroma.sqlite3                             # ChromaDB metadata store
+│   ├── _bm25_cache.pkl                            # BM25 index persistence cache
+│   └── <uuid>/                                    # ChromaDB segment directory
+└── .chroma_esp32_code/                            # ChromaDB persisted vector database (source code, see §6.5)
     ├── chroma.sqlite3                             # ChromaDB metadata store
-    ├── _bm25_cache.pkl                            # BM25 index persistence cache (~50MB)
+    ├── _bm25_cache.pkl                            # BM25 index persistence cache
     └── <uuid>/                                    # ChromaDB segment directory
 ```
 
@@ -56,8 +59,10 @@ This skill uses a three-stage retrieval path of **ChromaDB dense vector retrieva
 
 ### 3.1 ChromaDB Multi-layer Index — Collection Architecture
 
+There are two independent ChromaDB databases (see §6.0): the **documentation DB** (`.chroma_esp32_all/`, the default) and the **code DB** (`.chroma_esp32_code/`, built with `RAG_INDEX_CODE=1`). Both share the same collection schema (defined by `collection_map` in `config.yaml` plus the internal `chunks` / `docs` / `spec_summary` collections), but each database is populated with its own corpus.
+
 ```
-ChromaDB (.chroma_esp32_all/)
+Documentation DB (.chroma_esp32_all/)
 ├── chunks                   # Unified chunk index (primary index, backwards compatible)
 ├── docs                     # Document metadata index (summary, chunk list, file_hash per document)
 ├── spec_summary             # Structured spec index (for cross-document comparison)
@@ -68,22 +73,42 @@ ChromaDB (.chroma_esp32_all/)
 ├── safety_chunks            # Safety document chunks
 ├── release_chunks           # Release note chunks
 ├── spec_chunks              # Specification document chunks
+├── code_chunks              # Source code chunks (unused in the docs DB)
 └── docs_chunks              # General document chunks
+
+Code DB (.chroma_esp32_code/)       # opt-in, see §6.5
+├── chunks                   # Unified chunk index (source code chunks)
+├── docs                     # Document metadata index (file_hash per source file)
+├── code_chunks              # Source code chunks (doc type `code`)
+└── (other per-type collections exist but are unused)
 ```
 
 ### 3.2 Classification by Document Type
 
 Documents are classified automatically by path (based on `doc_type_rules` in `config.yaml`), with first-match priority:
 
-| Path keyword | Document type | Index collection | Search weight |
-|-----------|---------|---------|---------|
-| `api_reference` | api_reference | api_chunks | 3.0 |
-| `guide` | guide | guide_chunks | 3.0 |
-| `docs` | docs | docs_chunks | 2.0 |
-| `trm` / `technical_reference` | trm | trm_chunks | 2.0 |
-| `datasheet` | datasheet | datasheet_chunks | 1.0 |
-| `release` | release_notes | release_chunks | 2.0 |
-| `spec` | specification | spec_chunks | 2.0 |
+| Path keyword | Document type | Index collection |
+|-----------|---------|---------|
+| `api_reference` | api_reference | api_chunks |
+| `datasheet` | datasheet | datasheet_chunks |
+| `guide` | guide | guide_chunks |
+| `trm` / `technical_reference` | trm | trm_chunks |
+| `safety` | safety | safety_chunks |
+| `release` | release_notes | release_chunks |
+| `license` / `reference` | docs | docs_chunks |
+| `spec` | specification | spec_chunks |
+| *(fallback)* | docs | docs_chunks |
+
+Search weights are assigned independently by path (based on `weight_rules` in `config.yaml`), also first-match:
+
+| Path keyword | Search weight |
+|-----------|---------|
+| `api_reference` | 3.0 |
+| `guide` | 3.0 |
+| `docs` | 2.0 |
+| `trm` / `technical_reference` | 2.0 |
+| `datasheet` | 1.0 |
+| *(fallback)* | 1.0 |
 
 ### 3.3 Semantic Chunking Strategy
 
@@ -102,7 +127,7 @@ The chunking algorithm (`chunk_text()`) follows a hierarchical design:
 A domain-specific synonym table is defined (`query_expansions` in `config.yaml`), e.g.:
 - `flash` → `['bind', 'flash', 'flashing']`
 - `boot` → `['boot', 'bootloader', 'startup']`
-- `errcode` → `['errcode', 'error_code', 'error code', 'error id']`
+- `errcode` → `['errcode', 'err_code', 'error_code', 'error code', 'error id']`
 - `errata` → `['errata', 'known_issues', 'bugs']`
 
 Queries are expanded automatically to improve recall.
@@ -134,7 +159,7 @@ The SoC name to datasheet number mapping is configured under `soc_to_datasheet` 
 - The BM25 index is lazily rebuilt when `ChromaIndex` initializes (reading all document text from the chunks collection) and, once built, persisted to the `_bm25_cache.pkl` cache file (~50MB). With a cache, loading takes about 1 second; without a cache, the first search requires a full rebuild from ChromaDB (~12 seconds for 48k chunks), and it is persisted automatically afterward for later use.
 - **Not incremental**: when the index is updated (`add_chunks()`), BM25 performs a full rebuild using an accumulated token cache (`_BM25(token_cache + new_tokens)`) rather than modifying in place. The cache file is persisted after each rebuild.
 - **Cache integrity check**: on load, the number of cached IDs is compared against the actual chunk count in ChromaDB. If they differ, the cache is rebuilt automatically, avoiding retrieval gaps caused by a stale cache.
-- **Upper limit protection**: when the total number of chunks exceeds 200,000, BM25 retrieval is skipped (to avoid memory exhaustion); hybrid retrieval then degrades to pure dense vector retrieval.
+- **Upper limit protection**: when the total number of chunks exceeds `bm25_max_chunks` (config.yaml, default 300,000), BM25 retrieval is skipped (to avoid memory exhaustion); hybrid retrieval then degrades to pure dense vector retrieval.
 
 **Phase 3 — Cross-Encoder Reranking**: use `cross-encoder-ms-marco-MiniLM-L-6-v2` (located in `models/cross-encoder/`, switchable via `models.cross_encoder.default` in config.yaml) to score the candidate set pairwise, re-rank by relevance score, and take the Top `n_results`.
 
@@ -221,13 +246,16 @@ Searching, formatting, and source-file reading are wrapped into a single Bash ca
 
 ```bash
 cd <skill_dir>/scripts
-python3 agent.py "<query>" [--top N] [--type <doc_type>] [--raw]
+python3 agent.py "<query>" [--top N] [--type <doc_type>] [--raw] [--spec <SoC>] [--compare <A,B>] [--code]
 ```
 
 Parameters:
 - `--top N` : return the top N results (default 10)
-- `--type <doc_type>` : filter by document type (datasheet, trm, guide, api, safety, release_notes, specification)
+- `--type <doc_type>` : filter by document type (datasheet, trm, guide, api, safety, release_notes, specification, docs)
 - `--raw` : JSON lines output (machine-readable)
+- `--spec <name>` : look up structured spec data for a SoC (e.g. `esp32-s3`)
+- `--compare <A,B>` : compare the specs of two SoCs (e.g. `esp32-s3,esp32`)
+- `--code` : query the source-code database instead of the documentation DB (see §6.5)
 
 **Output notes**: the agent outputs in human-readable form by default; each result contains the chunk text (the `text` field) plus an excerpt from the corresponding non-PDF/ZIP/XLSX source file. If the agent output already includes an excerpt, prefer it over digging into the source file directly.
 
@@ -242,9 +270,12 @@ python3 agent.py "bootrom" --raw
 ### 5.2 Using the Python API directly (requires manual multi-step operations)
 
 ```python
-import pysqlite3
 import sys
-sys.modules['sqlite3'] = pysqlite3
+try:
+    import pysqlite3
+    sys.modules['sqlite3'] = pysqlite3
+except ImportError:
+    pass
 import os
 os.environ['RAG_CHROMA_DIR'] = '<skill_dir>/.chroma_esp32_all'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
@@ -257,6 +288,33 @@ results = index.search("ESP32-S3 boot process", n_results=10, hybrid=True, reran
 ```
 
 ## 6. Index Building and Updating
+
+### 6.0 Quick reference: build the **documentation** DB vs the **code** DB
+
+There are two independent databases; the build mode is chosen by `RAG_INDEX_CODE`.
+
+| | Documentation DB | Code DB |
+|---|---|---|
+| Enable | (default) | `$env:RAG_INDEX_CODE="1"` |
+| Source dir | `RAG_DOCS_DIR` (default `<skill_dir>/source`) | `code.docs_dir` (default `...\01. Software Code`) |
+| DB dir | `RAG_CHROMA_DIR` (default `<skill_dir>/.chroma_esp32_all`) | `code.chroma_dir` (default `<skill_dir>/.chroma_esp32_code`) |
+| Command | `python -m scripts.build.run` | `$env:RAG_INDEX_CODE="1"; python -m scripts.build.run` |
+
+Both are **incremental** by default: re-running only processes added/changed/deleted files.
+
+```powershell
+# --- build the documentation index (unchanged behaviour) ---
+.\.venv\Scripts\python.exe -m scripts.build.run
+
+# --- build the code index (uses code.docs_dir / code.chroma_dir from config.yaml) ---
+$env:RAG_INDEX_CODE="1"
+.\.venv\Scripts\python.exe -m scripts.build.run
+
+# explicit override always wins:
+$env:RAG_DOCS_DIR="D:\path\to\corpus"; $env:RAG_CHROMA_DIR="D:\path\to\db"
+```
+
+Resolution order for a code build: `RAG_DOCS_DIR`/`RAG_CHROMA_DIR` env → `code.docs_dir`/`code.chroma_dir` (a **relative** value is resolved against the skill root, e.g. `source_code`) → the `source/` / `.chroma_esp32_all` defaults.
 
 ### 6.1 First Build
 
@@ -380,6 +438,56 @@ Notes:
 - To query a separate database, point `RAG_CHROMA_DIR` at that directory as well (for example, the `RAG_CHROMA_DIR` read by `scripts/agent.py`).
 - Running the same command again performs an incremental update: added/changed/deleted documents are detected automatically, with no full rebuild needed.
 
+### 6.5 Indexing Source Code (opt-in, separate database)
+
+Source code can be indexed in addition to documents. This is **opt-in** and must go into a **separate** ChromaDB directory so it does not affect documentation ranking.
+
+Enable it with `RAG_INDEX_CODE=1` (or `code.enabled: true` in `config.yaml`). The code corpus path and DB directory default to `code.docs_dir` / `code.chroma_dir` in `config.yaml`, so no path needs to be typed:
+
+```powershell
+$env:RAG_INDEX_CODE="1"
+.\.venv\Scripts\python.exe -m scripts.build.run
+# RAG_DOCS_DIR / RAG_CHROMA_DIR still override the defaults when set explicitly
+```
+
+The default `code.docs_dir` is `D:\01.亚马逊\ESP32\esp\ESP32\01. Software Code`.
+
+How code is handled:
+
+- **Supported extensions** (`code.extensions` in `config.yaml`): `.c .h .cpp .hpp .cc .cxx .ino .py .S`.
+- **Function/class-aware chunking**: C/C++/Arduino files are split at top-level `{...}` units, Python files via `ast`. Each chunk keeps the unit's **signature and leading comment block**, and is prefixed with `File: <name> | Function/Class: <name>` so the embedding is context-aware. Oversized units are split by line; nothing is dropped.
+- **Noise control** (`code.exclude_dirs`): matched against whole **path segments** (case-insensitive; a trailing `*` is a prefix match, e.g. `espressif__*`). This excludes third-party libraries (`espressif__*`, `tinyusb_src`, `esp32-camera`, `decoder_ijg`, `MJPEG`, `LVGL`, `led_strip`) while **keeping** the board's own `components/BSP` drivers (KEY/LED/IIC/SPI/LCD…). Unlike a raw substring test it never drops a file just because its *name* contains a library name (e.g. `main/APP/lvgl_demo.c` is kept).
+- **Content dedup** (`code.dedup`, default `false`): BSP drivers are copied into every example, so the same file (e.g. `led.c`) appears dozens of times. When enabled (`dedup: true`), code files with identical MD5 are collapsed to a single copy (in the pilot this removed 292 of 615 files, 48%). The default `false` keeps every copy.
+- **File guards**: binary files, files with NUL bytes, and files larger than `code.max_file_size` (default 400 KB) are skipped. Line endings are normalized. Chunk labels use the relative path (e.g. `File: 02_key/components/BSP/KEY/key.c | Function: key_scan`).
+- **Metadata**: code chunks use doc type `code` (collection `code_chunks`) and `code.weight` (default 2.0).
+
+Querying the code database:
+
+```powershell
+# --code switches RAG_CHROMA_DIR/RAG_DOCS_DIR to the code DB configured under `code:`
+.\.venv\Scripts\python.exe scripts\agent.py --code "led blink gpio output" --top 5
+# hard-filter to code chunks only
+.\.venv\Scripts\python.exe scripts\agent.py --code --type code "gpio_set_level" --top 5
+```
+
+The `code.docs_dir` / `code.chroma_dir` keys in `config.yaml` provide the paths used by `agent.py --code`.
+
+**Portability of source excerpts**: the DB stores **relative** paths only, so an index is machine-independent — the corpus itself can stay wherever each customer keeps it. Just point the source root at your local corpus via `code.docs_dir` (absolute or relative) or the `RAG_DOCS_DIR` env var (which overrides). The agent resolves the stored relative path against the source root in this order: `RAG_DOCS_DIR` → `<skill_dir>/source` → `<skill_dir>/source_code`; separators are normalized, so a Windows-built index resolves on Linux. Optionally, to make the skill fully self-contained, place the corpus under `<skill_dir>/source_code` and set `code.docs_dir: source_code`. If a file cannot be found, the excerpt is silently skipped — the query itself still returns results. The customer's corpus must keep the **same relative directory structure** used at build time.
+
+**Full build result** (`01. Software Code`, all four categories — IDF / MicroPython / Arduino / Advanced Development Example): excluding third-party libraries and without deduplication, **10,535 documents → 208,318 chunks in ~13.7 hours** (bge-base-en-v1.5, CPU; DB ~5.2 GB). Chunk counts per category: IDF 653 docs, MicroPython 29, Arduino 187, Advanced Development 9,666. Because this exceeds 200k chunks, `bm25_max_chunks` is raised to 300,000 in `config.yaml` so BM25 hybrid retrieval stays enabled.
+
+**Code-query tuning**: when a query looks like source code (snake_case/camelCase identifiers, `foo()`, `::`, `#include`, or a `.c/.h/.py` extension), the engine boosts the BM25 exact-match component and down-weights the cross-encoder, which is unreliable on code. Both shares are configurable:
+
+```yaml
+code:
+  ce_weight: 0.25     # cross-encoder share of the final score (0..1)
+  bm25_weight: 1.0    # normalized BM25 share for code-like queries
+```
+
+Natural-language queries are unaffected (the tuning only triggers on code-like queries). Measured on the pilot: exact-identifier retrieval (identifier present in the top-3 results) improved from **6/10** (cross-encoder only) to **7/10** with the default blend.
+
+**Known limitation**: the default embedding model (`bge-base-en-v1.5`) and reranker (`cross-encoder-ms-marco`) are trained on natural language, so free-text → code retrieval is still weak; example `README.md` files (indexed as `docs`) carry much of the semantic value. For production-grade code search, consider a code-tuned embedding/reranking model.
+
 ## 7. Configuration (config.yaml)
 
 All document-related configuration is managed centrally in `config.yaml`:
@@ -391,6 +499,8 @@ All document-related configuration is managed centrally in `config.yaml`:
 | `doc_type_rules` | Path keyword → document type rules | Automatic classification during document extraction |
 | `weight_rules` | Path keyword → search weight | Affects BM25/vector retrieval ranking |
 | `collection_map` | Document type → ChromaDB collection name | Multi-collection routing isolation |
+| `bm25_max_chunks` | Chunk-count ceiling for BM25 hybrid retrieval | Raise above 200k for very large code corpora (default 300,000) |
+| `code` | Source-code indexing block (`enabled`, `extensions`, `exclude_dirs`, `dedup`, `docs_dir`, `chroma_dir`, `ce_weight`, `bm25_weight`, …) | Opt-in code corpus + separate DB; see §6.5 |
 
 ### 7.1 Model Configuration Details
 
@@ -442,7 +552,7 @@ To add a new SoC or adjust classification rules or weights, just edit `config.ya
 | Incremental build | MD5 content hash + deletion detection | No need to re-index unchanged documents; MD5 is more reliable than mtime |
 | Build-stage separation | File inventory scan → compare → stream processing | Phase 1 is pure filesystem work (<1s); only Phase 3 does the expensive extraction + embedding |
 | Memory management | Streaming, one document at a time | Avoids OOM on large corpora |
-| BM25 cache | Lazy rebuild on search + pickle persistence + load-time count check | With cache ~1s; without cache first build ~12s then persisted automatically; full rebuild is not incremental; auto-degrades/skips beyond 200k chunks |
+| BM25 cache | Lazy rebuild on search + pickle persistence + load-time count check | With cache ~1s; without cache first build ~12s then persisted automatically; full rebuild is not incremental; auto-degrades/skips beyond `bm25_max_chunks` (default 300k) |
 | XLSX blank-row filtering | openpyxl row-level filtering | Filters all-empty rows and pure decoration rows, cutting ~30% of invalid chunks |
 | Query enhancement | Agent automatically attaches source-file excerpts + allows access to source/ files | Provides more context when chunk text is insufficient; binary formats such as PDF are skipped automatically |
 | Config management | Centralized `config.yaml` | SoC mapping, document classification, weights, etc. are configurable; adding a new SoC needs no code changes |
