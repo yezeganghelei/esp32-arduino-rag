@@ -2052,10 +2052,14 @@ class ChromaIndex:
 
     COLLECTION_MAP = _cfg.get('collection_map', {})
 
-    def __init__(self, chroma_dir: str, model_name: str = None):
+    def __init__(self, chroma_dir: str, model_name: str = None,
+                 embedding_function=None):
         self._chroma_dir = chroma_dir
         self._client = chromadb.PersistentClient(path=chroma_dir)
-        self._ef = LocalModelEmbeddingFunction(model_name)
+        # An existing embedding function can be injected to share one model
+        # across multiple ChromaIndex instances (avoids loading the dense model
+        # twice when querying the documentation and code DBs together).
+        self._ef = embedding_function or LocalModelEmbeddingFunction(model_name)
 
         # Don't pass embedding_function to ChromaDB — its built-in ONNX embedder
         # tries to download from S3 and fails in this environment.

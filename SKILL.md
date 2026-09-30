@@ -39,7 +39,7 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
 
    Then run:
    ```bash
-   # General search
+   # General search (searches BOTH the documentation DB and the code DB, merged)
    python <skill_dir>/scripts/agent.py "<query>" [--top N] [--type <doc_type>]
 
    # Structured spec lookup (e.g. "esp32-s3 GPU specs")
@@ -56,7 +56,10 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
    - `--raw` : JSON lines output (machine-readable)
    - `--spec <name>` : look up structured spec data for a SoC (e.g. "esp32-s3")
    - `--compare <A,B>` : compare the specs of two SoCs (e.g. "esp32-s3,esp32")
-   - `--code` : query the **source-code database** instead of the documentation DB (uses `code.docs_dir` / `code.chroma_dir` from config.yaml). Combine with `--type code` to search code chunks only. Example: `python <skill_dir>/scripts/agent.py --code --type code "ledc pwm config"`.
+   - `--code` : query **only** the source-code database (uses `code.docs_dir` / `code.chroma_dir` from config.yaml); doc type defaults to `code`.
+   - `--docs-only` : query **only** the documentation database (the default behavior before the code DB was added).
+
+   **Default behavior** (no `--code` / `--docs-only`): a normal query searches **both** databases and merges the results by reciprocal-rank fusion, so code chunks (tagged `[code]`) appear automatically even when the query has no explicit "code" keyword (e.g. "how to configure LEDC PWM"). Spec/comparison routes (`--spec`, `--compare`) and any `--type` filter other than `code` remain documentation-only. Use `--docs-only` for pure spec/register questions where code results would be noise, and `--code` when only code is wanted.
 
    **Examples:**
    ```bash

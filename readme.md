@@ -246,7 +246,7 @@ Searching, formatting, and source-file reading are wrapped into a single Bash ca
 
 ```bash
 cd <skill_dir>/scripts
-python3 agent.py "<query>" [--top N] [--type <doc_type>] [--raw] [--spec <SoC>] [--compare <A,B>] [--code]
+python3 agent.py "<query>" [--top N] [--type <doc_type>] [--raw] [--spec <SoC>] [--compare <A,B>] [--code] [--docs-only]
 ```
 
 Parameters:
@@ -255,7 +255,10 @@ Parameters:
 - `--raw` : JSON lines output (machine-readable)
 - `--spec <name>` : look up structured spec data for a SoC (e.g. `esp32-s3`)
 - `--compare <A,B>` : compare the specs of two SoCs (e.g. `esp32-s3,esp32`)
-- `--code` : query the source-code database instead of the documentation DB (see §6.5)
+- `--code` : query **only** the source-code database (see §6.5); doc type defaults to `code`
+- `--docs-only` : query **only** the documentation database
+
+**Default behavior** (no `--code` / `--docs-only`): a normal query searches **both** databases and merges the results by reciprocal-rank fusion, so code chunks (tagged `[code]`) surface automatically even when the query contains no explicit "code" keyword (e.g. "how to configure LEDC PWM"). `--spec` / `--compare` and any `--type` other than `code` remain documentation-only. Use `--docs-only` to suppress code noise for pure spec/register questions, and `--code` when only code is wanted.
 
 **Output notes**: the agent outputs in human-readable form by default; each result contains the chunk text (the `text` field) plus an excerpt from the corresponding non-PDF/ZIP/XLSX source file. If the agent output already includes an excerpt, prefer it over digging into the source file directly.
 
@@ -265,6 +268,8 @@ python3 agent.py "ESP32-S3 boot process" --top 5
 python3 agent.py "errata error code"
 python3 agent.py "esp32-s3 vs esp32"
 python3 agent.py "bootrom" --raw
+python3 agent.py "how to configure LEDC PWM"          # searches docs + code, merged
+python3 agent.py --docs-only "LEDC clock sources"     # documentation only
 ```
 
 ### 5.2 Using the Python API directly (requires manual multi-step operations)
