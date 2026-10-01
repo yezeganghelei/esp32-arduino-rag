@@ -42,7 +42,7 @@ code:
   #              RAG_DOCS_DIR env var overrides it at runtime, so each machine
   #              can keep the corpus wherever it likes.
   #   chroma_dir : where the code vector DB lives (relative to skill dir).
-  docs_dir: "D:\\01.亚马逊\\ESP32\\esp\\ESP32\\01. Software Code"
+  docs_dir: "source_code"
   chroma_dir: ".chroma_esp32_code"
 
 # Model configuration

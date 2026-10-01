@@ -94,7 +94,10 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
    ```
    ① The chunk text returned by the agent (the `text` field) is sufficient -> answer directly, citing the chunk source title
    ② Chunk text insufficient -> use the source excerpt included by the agent (`> _Excerpt from source file:_`)
-   ③ Excerpt still insufficient -> read the corresponding source file under the `source/` directory, **using a relative path**: `Read(<skill_dir>/source/<relative path>)`; do not use absolute paths
+   ③ Excerpt still insufficient -> read the source file by resolving the base directory from the CURRENT config each time (never reuse an absolute path seen earlier in the conversation):
+     - documentation: `RAG_DOCS_DIR` env var, or `<skill_dir>/source/`
+     - source code: `code.docs_dir` from `config.yaml` (e.g. `source_code/`)
+     then read `<base>/<relative path>`; do not use absolute paths
    ④ Source file not found either -> clearly tell the user the answer cannot be obtained from the documents
    ```
 
