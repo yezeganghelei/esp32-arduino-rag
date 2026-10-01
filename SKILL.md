@@ -106,7 +106,7 @@ All document-related configuration is centralized in `<skill_dir>/config.yaml`:
 
 - **`models`** — default and available embedding and reranking models.
   - `models.dense.default`: default embedding model (`bge-base-en-v1.5`); can be temporarily switched with the build `--model` parameter
-  - `models.cross_encoder.default`: default reranking model (`cross-encoder-ms-marco-MiniLM-L6-v2`); change only via config.yaml
+  - `models.cross_encoder.default`: default reranking model (`cross-encoder-ms-marco-MiniLM-L-6-v2`); change only via config.yaml
 - **`soc_to_datasheet`** — SoC name to datasheet number mapping, used for comparison and spec queries.
 - **`doc_type_rules`** — document type classification rules (matched by subpath keywords).
 - **`weight_rules`** — document weight rules, affecting recall ranking.
@@ -136,7 +136,7 @@ python -m scripts.build.run --model all-MiniLM-L6-v2
 - **Hybrid retrieval**: when `hybrid=True`, BM25 keyword retrieval complements dense vector retrieval. For queries containing hexadecimal error codes, the system automatically detects them and boosts matching BM25 results, ensuring error-code queries prioritize reference tables containing error codes.
 - **Query expansion**: domain synonyms are expanded automatically (e.g. `errcode` -> `errcode, error_code, error id`).
 - **Low-value content filtering**: register dumps, hex-dense lines, bare "Table N" headings and other low-information content are filtered out automatically.
-- **BM25 persistent cache**: the BM25 index is rebuilt from ChromaDB on first search and cached as `.chroma_esp32_all/_bm25_cache.pkl` (~50MB); subsequent searches load the cache directly (~1s). The cache is refreshed incrementally when the index is updated. On load, the cache validates document-count consistency and rebuilds if inconsistent (solving the stale-cache problem).
+- **BM25 persistent cache**: the BM25 index is rebuilt from ChromaDB on first search and cached as `.chroma_esp32_all/_bm25_cache.pkl` (size varies with the corpus); subsequent searches load the cache directly (~1s). The cache is refreshed incrementally when the index is updated. On load, the cache validates document-count consistency and rebuilds if inconsistent (solving the stale-cache problem).
 - **XLSX blank-row filtering**: when processing XLSX tables, all-empty rows and pure decoration rows (e.g. `---|---|---`) are filtered out, reducing invalid chunks.
 - **Comparison queries**: queries like "esp32-s3 vs esp32" are detected automatically, and structured spec data is extracted directly from the `spec_summary` collection for comparison.
 
@@ -185,14 +185,15 @@ Key dependencies: sentence-transformers, chromadb, PyMuPDF, rank-bm25, Beautiful
 
 ## Directory structure
 
-- `<skill_dir>/source/` — raw source documents (PDF, ZIP, XLSX), organized by SoC series and document type
-- `<skill_dir>/.chroma_esp32_all/` — ChromaDB dense vector index (persisted, with file_hash (MD5) tracking + BM25 cache `_bm25_cache.pkl`)
+- `<skill_dir>/source/` — raw source documents (PDF, ZIP, XLSX), organized by SoC series and document type (empty by default; the corpus is pointed to via `RAG_DOCS_DIR` / `code.docs_dir`)
+- `<skill_dir>/.chroma_esp32_all/` — ChromaDB vector index for **documentation** (persisted, with file_hash (MD5) tracking + BM25 cache `_bm25_cache.pkl`)
+- `<skill_dir>/.chroma_esp32_code/` — ChromaDB vector index for **source code** (opt-in, see the `code:` block in config.yaml)
 - `<skill_dir>/config.yaml` — document classification, weights, SoC->datasheet mapping, etc.
 - `<skill_dir>/scripts/main.py` — RAG engine implementation (index build, search, comparison, hex boosting, BM25 cache)
 - `<skill_dir>/scripts/agent.py` — one-shot query entry point (a single Bash call completes search + output, avoiding repeated permission prompts)
 - `<skill_dir>/models/` — local offline models
   - `models/dense/` — bi-encoder embedding models (bge-base-en-v1.5 is the default; alternatives: all-MiniLM-L6-v2, gte-base-en-v1.5, embeddinggemma-300m-npu)
-  - `models/cross-encoder/` — cross-encoder reranking model (cross-encoder-ms-marco-MiniLM-L6-v2)
+  - `models/cross-encoder/` — cross-encoder reranking model (cross-encoder-ms-marco-MiniLM-L-6-v2)
 
 ## Build/rebuild the index
 
@@ -217,7 +218,7 @@ python -m scripts.build.run --model gte-base-en-v1.5   # specified model
 This will:
 1. **Incremental** — compare file content MD5 against the existing index and only re-index added/changed/deleted documents
 2. **Streaming** — process one document at a time (especially ZIP files: extract each inner sub-file one by one -> chunk -> vectorize -> index, freeing memory immediately afterward, without loading the whole ZIP into memory at once)
-3. **Monitoring** — print index status (document count, chunk count) automatically every 10 minutes
+3. **Monitoring** — print index status (document count, chunk count) automatically every 5 minutes
 
 Build a specific file or directory (after activation):
 ```bash
