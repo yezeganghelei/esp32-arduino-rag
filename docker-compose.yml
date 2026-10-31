@@ -1,0 +1,70 @@
+# ── ESP32 RAG docker-compose.yml ───────────────────────────────────
+#
+# Quick start:
+#   1. Copy .env.example to .env and fill in LLM_API_KEY
+#   2. docker-compose up -d --build
+#   3. Web chat UI:  http://localhost:7860
+#      API docs:     http://localhost:8000/docs
+#
+# Rebuild after code changes:
+#   docker-compose up -d --build
+#
+# Run one-off commands:
+#   docker-compose run --rm esp-rag "ESP32-S3 boot process" --top 5
+#   docker-compose run --rm esp-rag build
+#
+# All data directories are mounted as volumes (Scheme A: data external).
+# Add / remove volumes as needed (e.g. code DB).
+
+services:
+  esp-rag:
+    build: .
+    image: esp-rag:latest
+    container_name: esp-rag
+    restart: unless-stopped
+    ports:
+      - "8000:8000"     # FastAPI / HTTP API
+      - "7860:7860"     # Gradio web chat UI
+    environment:
+      - TRANSFORMERS_OFFLINE=1
+      - HF_HUB_OFFLINE=1
+      - RAG_CHROMA_DIR=/app/.chroma_esp32_all
+      - RAG_DOCS_DIR=/app/source
+      - RAG_CODE_CHROMA_DIR=/app/.chroma_esp32_code
+      - RAG_CODE_DOCS_DIR=/app/source_code
+
+      # ── LLM API (for chat / RAG generation) ─────────────────────
+      # Get from .env file (copy .env.example → .env)
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-deepseek-chat}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.3}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
+
+      # ── Web UI config ───────────────────────────────────────────
+      - API_BASE_URL=http://localhost:8000
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=7860
+    volumes:
+      # ── Models (read-only, large files) ──────────────────────────
+      - ./models:/app/models:ro
+
+      # ── Source documents (read-only) ─────────────────────────────
+      - ./source:/app/source:ro
+
+      # ── Vector DB (read-write, for incremental builds) ───────────
+      - ./.chroma_esp32_all:/app/.chroma_esp32_all
+      - ./.chroma_esp32_code:/app/.chroma_esp32_code
+
+      # ── Source code (read-only, for code search) ────────────────
+      - ./source_code:/app/source_code:ro
+
+      # ── Config (mounted so you can edit without rebuilding) ──────
+      - ./config.yaml:/app/config.yaml:ro
+    command: all
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s    # first request loads the model, can take a while

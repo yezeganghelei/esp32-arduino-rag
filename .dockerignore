@@ -1,0 +1,62 @@
+# ── .dockerignore ─────────────────────────────────────────────────
+# Files that should NOT be copied into the Docker build context.
+# Keeps the build context small and speeds up builds.
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build logs
+*.log
+*.err
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+
+# Node (if any)
+node_modules/
+
+# Large data directories are mounted as volumes, not baked in.
+# (Scheme A: data lives outside the image)
+models/
+source/
+source_code/
+.chroma_*/
+*.vhdx
+
+# Skill / project docs that are not needed at runtime
+readme.md
+SKILL.md
+ESP-RAG-实施方案.md
+output_resolution.md
+docs_build.log
+docs_build.err
+code_build.log
+code_build.err
