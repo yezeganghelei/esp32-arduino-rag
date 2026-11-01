@@ -213,16 +213,18 @@ async def search(req: SearchRequest, kind: str = Query("auto", description="Inde
 
     start = time.time()
 
+    # The search endpoint is the raw-search analog of agent.py's default search
+    # (kind = auto/docs/code). Spec/compare are separate endpoints, matching the
+    # skill's --spec / --compare commands. The rewrite only translates the query;
+    # it does not change the search kind here.
     docs_query = req.query
     code_query = req.query
     if req.rewrite:
         try:
             from scripts.api.llm import rewrite_queries
-            dq, cq = await rewrite_queries(req.query)
-            if dq and dq.strip():
-                docs_query = dq.strip()
-            if cq and cq.strip():
-                code_query = cq.strip()
+            route = await rewrite_queries(req.query)
+            docs_query = route.get("docs_query") or req.query
+            code_query = route.get("code_query") or req.query
         except Exception:
             docs_query = req.query
             code_query = req.query
@@ -243,50 +245,6 @@ async def search(req: SearchRequest, kind: str = Query("auto", description="Inde
         'results': normalized,
         'total': len(normalized),
         'elapsed_ms': round((time.time() - start) * 1000, 2),
-    }
-
-
-@app.get("/api/spec/{soc_name}", tags=["Specs"])
-async def get_spec(soc_name: str):
-    """Look up structured specifications for an ESP32 SoC.
-
-    Example: `/api/spec/esp32-s3`
-    """
-    specs = await asyncio.to_thread(rag_api.lookup_spec, soc_name)
-    if not specs or not specs[0].get('specs'):
-        raise HTTPException(status_code=404, detail=f"No spec data found for '{soc_name}'")
-
-    spec = specs[0]
-    spec_entries = [
-        {'feature': k, 'value': v}
-        for k, v in spec.get('specs', {}).items()
-    ]
-    return {
-        'soc': soc_name,
-        'doc_title': spec.get('doc_title', ''),
-        'specs': spec_entries,
-    }
-
-
-@app.get("/api/compare", tags=["Specs"])
-async def compare_specs(
-    a: str = Query(..., description="First SoC name, e.g. esp32-s3"),
-    b: str = Query(..., description="Second SoC name, e.g. esp32"),
-):
-    """Compare specifications of two ESP32 SoCs.
-
-    Example: `/api/compare?a=esp32-s3&b=esp32`
-    """
-    results = await asyncio.to_thread(rag_api.compare, [a, b])
-    if not results:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Could not find specs for both SoCs: {[a, b]}")
-
-    return {
-        'type': 'comparison',
-        'table': results[0]['table'],
-        'specs': results[0]['specs'],
     }
 
 
@@ -328,19 +286,16 @@ class ChatSessionResponse(BaseModel):
 _chat_engines: Dict[str, object] = {}  # kind -> RAGChat instance
 
 
-def get_chat(kind: str = "docs"):
-    """Get or create a RAGChat instance for the given index kind."""
+def get_chat(kind: str = "auto"):
+    """Get or create a RAGChat instance for the given query kind.
+
+    kind: "auto" (LLM decides mode) | "docs" (force docs) | "code" (force code).
+    """
     global _chat_engines
     if kind not in _chat_engines:
         from scripts.api.chat import RAGChat
-        if kind == "auto":
-            def _retriever(query, code_query=None, doc_type=None, top_k=8):
-                results, _ = rag_api.search(query, top_k, doc_type, 'auto', code_query)
-                return results
-            _chat_engines[kind] = RAGChat(index=None, top_k=8, retriever=_retriever)
-        else:
-            index = rag_api.get_doc_index() if kind == "docs" else rag_api.get_code_index()
-            _chat_engines[kind] = RAGChat(index, top_k=8)
+        forced = None if kind == "auto" else kind
+        _chat_engines[kind] = RAGChat(top_k=8, forced_mode=forced)
     return _chat_engines[kind]
 
 

@@ -1935,103 +1935,6 @@ def _clean_spec_values(specs: Dict[str, str]) -> Dict[str, str]:
     return cleaned
 
 
-def _detect_comparison_query(query: str) -> Optional[Tuple[List[str], str]]:
-    """Detect if query is asking for cross-document comparison.
-
-    Returns (doc_names, feature) or None.
-    E.g., 'compare A vs B' -> (['A', 'B'], '')
-           'compare A vs B feature' -> (['A', 'B'], 'feature')
-    """
-    q = query.strip()
-
-    # Pattern 1: "compare X and Y" or "compare X vs Y"
-    m = re.search(
-        r'compare\s+(.+?)\s+(?:and|vs|versus)\s+(.+?)(?:\s+(.+))?$',
-        q, re.IGNORECASE
-    )
-    if m:
-        return ([m.group(1).strip().upper(), m.group(2).strip().upper()],
-                (m.group(3) or '').strip())
-
-    # Pattern 2: "X vs Y" or "X vs Y feature"
-    m = re.search(
-        r'^(.+?)\s+vs\.?\s+(.+?)(?:\s+(.+))?$',
-        q, re.IGNORECASE
-    )
-    if m:
-        return ([m.group(1).strip().upper(), m.group(2).strip().upper()],
-                (m.group(3) or '').strip())
-
-    # Pattern 3: "difference between X and Y" (English)
-    m = re.search(
-        r'difference[s]?\s+between\s+(.+?)\s+and\s+(.+?)(?:\s+(.+))?$',
-        q, re.IGNORECASE
-    )
-    if m:
-        return ([m.group(1).strip().upper(), m.group(2).strip().upper()],
-                (m.group(3) or '').strip())
-
-    # Pattern 5: Chinese comparison patterns
-    #   "X and Y - what is the difference/diff/discrepancy/contrast"
-    #   "the difference between X and Y"
-    #   "compare X and Y"
-    #   "X compared with Y"
-    m = re.search(r'^(.+?)\s+(?:和|与|跟)\s+(.+?)\s+有.{0,2}(?:区别|差异|不同|差别)', q)
-    if m:
-        return ([m.group(1).strip().upper(), m.group(2).strip().upper()], '')
-
-    m = re.search(r'^(.+?)\s+(?:和|与|跟)\s+(.+?)\s+的(?:区别|差异|不同|差别)', q)
-    if m:
-        return ([m.group(1).strip().upper(), m.group(2).strip().upper()], '')
-
-    m = re.search(r'^对比\s+(.+?)\s+(?:和|与|跟)\s+(.+?)\s*$', q)
-    if m:
-        return ([m.group(1).strip().upper(), m.group(2).strip().upper()], '')
-
-    m = re.search(r'^(.+?)\s+(?:相比|对比)\s+(.+?)\s*$', q)
-    if m:
-        return ([m.group(1).strip().upper(), m.group(2).strip().upper()], '')
-
-    # Pattern 4: "X specs" or "X datasheet"
-    m = re.search(r'^(.+?)\s+(?:specs?|specification|datasheet)s?\s*(.+)?$', q, re.IGNORECASE)
-    if m:
-        doc_name = m.group(1).strip().upper()
-        feature = (m.group(2) or '').strip()
-        return ([doc_name], feature)
-
-    return None
-
-
-def _format_comparison(specs_list: List[dict]) -> str:
-    """Build a markdown comparison table from spec dicts."""
-    if not specs_list:
-        return ""
-
-    # Collect all feature keys across all docs
-    all_features: List[str] = []
-    seen_features: Set[str] = set()
-    for sd in specs_list:
-        for k in sd.get('specs', {}):
-            if k not in seen_features:
-                all_features.append(k)
-                seen_features.add(k)
-
-    doc_titles = [sd['doc_title'] for sd in specs_list]
-
-    lines = []
-    lines.append('| Feature | ' + ' | '.join(doc_titles) + ' |')
-    lines.append('|' + '|'.join(['---'] * (len(doc_titles) + 1)) + '|')
-
-    for feat in all_features:
-        row = [feat]
-        for sd in specs_list:
-            row.append(sd.get('specs', {}).get(feat, '—'))
-        lines.append('| ' + ' | '.join(row) + ' |')
-
-    return '\n'.join(lines)
-
-
-# ── Doc name mapping for cross-document comparison ─────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
 
 class ChromaIndex:
@@ -3172,50 +3075,12 @@ def get_documents_for_file(fpath: str, base_dir: str):
 def query(index: ChromaIndex, question: str,
           n_results: int = 10, where: Optional[dict] = None,
           doc_type: Optional[str] = None) -> List[dict]:
-    """Query the index and return top-n results.
+    """Query the index and return top-n results (raw retrieval only).
 
     If doc_type is specified, searches only that doc type's collection.
-    If the query looks like a cross-document comparison, returns structured
-    comparison results.
+    No spec/comparison detection is performed — all queries go through the
+    raw dense + BM25 + cross-encoder search.
     """
-    # Check for comparison query
-    comparison = _detect_comparison_query(question)
-    if comparison:
-        doc_names, feature = comparison
-        specs_list = []
-        for name in doc_names:
-            name_upper = name.upper().replace('-', ' ').strip()
-            matched = index.lookup_specs(name)
-            if not matched:
-                part_no = SOC_TO_DATASHEET.get(name_upper)
-                if part_no:
-                    matched = index.lookup_specs(part_no)
-                else:
-                    # Broader fallback: check if any datasheet prefix is in the name
-                    for part_name, prefix in SOC_TO_DATASHEET.items():
-                        if prefix in name_upper or part_name.replace(' ', '') in name_upper:
-                            matched = index.lookup_specs(prefix)
-                            break
-            specs_list.extend(matched)
-        if len(specs_list) >= 2:
-            comparison_table = _format_comparison(specs_list)
-            if comparison_table:
-                return [{
-                    'type': 'comparison',
-                    'table': comparison_table,
-                    'specs': specs_list,
-                }]
-        elif len(specs_list) == 1 and not feature:
-            # Single doc specs request
-            spec = specs_list[0]
-            lines = [f"## {spec['doc_title']} Specifications\n"]
-            lines.append('| Feature | Value |')
-            lines.append('|---------|-------|')
-            for k, v in spec['specs'].items():
-                lines.append(f"| {k} | {v} |")
-            return [{'type': 'comparison', 'table': '\n'.join(lines), 'specs': specs_list}]
-
-    # Fall through to normal search
     return index.search(question, n_results=n_results, where=where, doc_type=doc_type)
 
 

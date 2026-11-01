@@ -99,6 +99,37 @@ def _format_sources_md(sources: list) -> str:
     return "\n".join(lines)
 
 
+# ── Progress bar ────────────────────────────────────────────────────
+
+PROGRESS_STAGES = {
+    "rewrite": ("🔍 理解意图中…", 20),
+    "retrieve": ("📚 检索文档和代码中…", 55),
+    "decompose": ("🔎 深挖检索中…", 75),
+    "answer": ("✍️ 生成回答中…", 90),
+    "done": ("✅ 完成", 100),
+    "error": ("❌ 出错", 100),
+    "idle": ("", 0),
+}
+
+
+def _progress_html(stage: str) -> str:
+    """Render a progress bar for the given stage."""
+    label, pct = PROGRESS_STAGES.get(stage, ("处理中…", 50))
+    color = "#dc2626" if stage == "error" else "#2563eb"
+    if not label:
+        return ""
+    return (
+        f'<div style="padding:4px 2px;">'
+        f'<div style="display:flex;justify-content:space-between;margin-bottom:3px;">'
+        f'<span style="font-size:0.85em;color:#374151;">{label}</span>'
+        f'<span style="font-size:0.85em;color:#9ca3af;">{pct}%</span>'
+        f'</div>'
+        f'<div style="background:#e5e7eb;border-radius:6px;height:8px;overflow:hidden;">'
+        f'<div style="background:{color};height:100%;width:{pct}%;transition:width .3s ease;"></div>'
+        f'</div></div>'
+    )
+
+
 # ── Chat logic (streaming) ──────────────────────────────────────────
 
 def chat_stream(
@@ -108,18 +139,18 @@ def chat_stream(
     doc_type: Optional[str],
     top_k: int,
     kb_kind: str,
-) -> Generator[Tuple[str, List[List[str]], str], None, None]:
+) -> Generator[Tuple[str, List[List[str]], str, str], None, None]:
     """Stream chat response from the API.
 
-    Yields: (current_assistant_message, updated_history, session_id)
+    Yields: (current_assistant_message, updated_history, session_id, progress_html)
     """
     if not message.strip():
-        yield "", history, session_id
+        yield "", history, session_id, _progress_html("idle")
         return
 
     # Append user message to history
     history = history + [[message, ""]]
-    yield "", history, session_id
+    yield "", history, session_id, _progress_html("rewrite")
 
     sources = []
     full_answer = []
@@ -143,7 +174,7 @@ def chat_stream(
             if response.status_code != 200:
                 error_msg = f"❌ 服务错误 ({response.status_code})"
                 history[-1][1] = error_msg
-                yield "", history, session_id
+                yield "", history, session_id, _progress_html("error")
                 return
 
             for line in response.iter_lines():
@@ -159,7 +190,11 @@ def chat_stream(
 
                 event_type = event.get("type", "")
 
-                if event_type == "sources":
+                if event_type == "progress":
+                    stage = event.get("stage", "")
+                    yield "", history, session_id, _progress_html(stage)
+
+                elif event_type == "sources":
                     sources = event.get("data", [])
 
                 elif event_type == "start":
@@ -173,7 +208,7 @@ def chat_stream(
                     # Update the last assistant message
                     answer_text = "".join(full_answer)
                     history[-1][1] = answer_text
-                    yield "", history, session_id
+                    yield "", history, session_id, _progress_html("answer")
 
                 elif event_type == "done":
                     # Add sources to the end of the answer
@@ -182,20 +217,20 @@ def chat_stream(
                     if sources_md:
                         answer_text += sources_md
                     history[-1][1] = answer_text
-                    yield "", history, session_id
+                    yield "", history, session_id, _progress_html("done")
 
                 elif event_type == "error":
                     error_msg = f"❌ {event.get('content', 'Unknown error')}"
                     history[-1][1] = error_msg
-                    yield "", history, session_id
+                    yield "", history, session_id, _progress_html("error")
                     return
 
     except httpx.ConnectError:
         history[-1][1] = "❌ 无法连接到后端服务，请确认 API 服务已启动"
-        yield "", history, session_id
+        yield "", history, session_id, _progress_html("error")
     except Exception as e:
         history[-1][1] = f"❌ 出错了：{e}"
-        yield "", history, session_id
+        yield "", history, session_id, _progress_html("error")
 
 
 def new_chat() -> Tuple[str, List, str]:
@@ -293,6 +328,8 @@ def build_ui() -> gr.Blocks:
                     )
                     send_btn = gr.Button("发送", variant="primary", scale=1)
 
+                progress_display = gr.HTML(value=_progress_html("idle"))
+
                 gr.Examples(
                     examples=[
                         "ESP32-S3 的 GPIO 中断怎么配置？",
@@ -309,14 +346,14 @@ def build_ui() -> gr.Blocks:
         msg_input.submit(
             fn=chat_stream,
             inputs=[msg_input, chatbot, session_id, doc_type_dropdown, top_k_slider, kb_kind_radio],
-            outputs=[msg_input, chatbot, session_id],
+            outputs=[msg_input, chatbot, session_id, progress_display],
             api_name=None,
         )
 
         send_btn.click(
             fn=chat_stream,
             inputs=[msg_input, chatbot, session_id, doc_type_dropdown, top_k_slider, kb_kind_radio],
-            outputs=[msg_input, chatbot, session_id],
+            outputs=[msg_input, chatbot, session_id, progress_display],
             api_name=None,
         )
 

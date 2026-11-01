@@ -7,7 +7,7 @@ with source citations.
 
 Usage:
     from scripts.api.chat import RAGChat
-    chat = RAGChat(index)
+    chat = RAGChat(top_k=8)
     answer, sources = await chat.ask("How to configure GPIO interrupts?")
 """
 
@@ -24,16 +24,17 @@ logger = logging.getLogger(__name__)
 
 # ── System prompt ───────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """你是一位专业的 ESP32 技术支持工程师，基于乐鑫官方文档回答用户问题。
+SYSTEM_PROMPT = """你是一位专业的 ESP32 技术支持工程师，基于乐鑫官方文档和代码回答用户问题。
 
 回答规则：
-1. 严格基于提供的参考文档回答，不要编造信息
-2. 如果参考文档中没有相关内容，明确告诉用户"在现有文档中未找到相关信息"，不要猜测
-3. 回答要准确、专业、条理清晰
-4. 技术细节（寄存器、地址、数值等）务必准确引用
-5. 代码示例要完整可运行
-6. 适当使用 Markdown 格式（标题、列表、代码块）组织回答
-7. 在回答末尾列出引用的文档来源
+1. 严格基于提供的参考文档回答，绝不编造信息，不补充检索结果之外的事实。
+2. 每个关键事实、数值、寄存器都必须标注来源，格式为 [Source: <文档标题>]。
+3. 如果参考文档中没有相关内容，明确告诉用户"在现有文档中未找到相关信息"，不要猜测。
+4. 如果多条参考文档互相矛盾，要分别指出每条来源的说法，说明冲突。
+5. 回答准确、专业、条理清晰；技术细节（寄存器、地址、数值等）务必准确引用。
+6. 适当使用 Markdown（标题、列表、代码块）组织回答。
+7. 当用户明确要求某种实现方式（Arduino / MicroPython / ESP-IDF / IDF 等）时，只要参考文档中出现了该方式的代码（哪怕是驱动文件、BSP、片段、函数实现），就必须把它**完整地**放进代码块输出（不要只摘一两行、不要用文字总结代替代码），并标注来源文件（[Source: <文件名>]）。不要因为"不是完整的可运行示例"就宣称"未找到该方式"。
+8. 在回答末尾列出引用的文档来源。
 
 参考文档格式：
 ---
@@ -54,6 +55,8 @@ class SourceDoc:
     score: float
     source_file: str = ""
     section_path: str = ""
+    src_root: str = ""
+    chunk_id: str = ""
 
 
 @dataclass
@@ -127,12 +130,18 @@ class SessionStore:
 # ── RAG Chat core ───────────────────────────────────────────────────
 
 class RAGChat:
-    """RAG chat engine — retrieves docs, builds prompt, calls LLM."""
+    """RAG chat engine — understands intent, retrieves, builds prompt, calls LLM.
 
-    def __init__(self, index=None, top_k: int = 8, retriever=None):
-        self.index = index
+    Retrieval goes through `rag_api.run_query` (the same unified kernel used by
+    the skill's agent.py), so the web and the skill share identical retrieval
+    behaviour. Both the docs DB and the code DB are always searched (no
+    "docs vs code" classification); `forced_mode` ("docs"/"code") is only set by
+    the web UI's explicit selector to restrict the search.
+    """
+
+    def __init__(self, top_k: int = 8, forced_mode: Optional[str] = None):
         self.top_k = top_k
-        self._retriever = retriever
+        self.forced_mode = forced_mode
         self._store = SessionStore()
 
     def get_session(self, session_id: Optional[str] = None) -> ChatSession:
@@ -145,55 +154,131 @@ class RAGChat:
         """Clear conversation history for a session."""
         self._store.delete(session_id)
 
-    def _retrieve_sync(self, query: str, code_query: Optional[str] = None,
-                       doc_type: Optional[str] = None) -> List[SourceDoc]:
-        """Retrieve relevant documents from the index (or a custom retriever).
+    def _retrieve_sync(self, route: dict, doc_type: Optional[str] = None) -> List[SourceDoc]:
+        """Retrieve relevant documents via rag_api.run_query.
 
         Runs synchronously; call via _retrieve() so it executes off the
         event-loop thread and does not block other requests.
         """
-        if self._retriever is not None:
-            raw_results = self._retriever(query, code_query, doc_type, self.top_k)
-        else:
-            # Import here to avoid circular imports
-            from main import query as rag_query
-            raw_results = rag_query(
-                self.index,
-                query,
-                n_results=self.top_k,
-                doc_type=doc_type,
-            )
-
+        import rag_api
+        raw_results, _kind = rag_api.run_query(route, self.top_k, doc_type,
+                                               forced_mode=self.forced_mode)
         return self._to_sources(raw_results)
 
-    async def _retrieve(self, query: str, code_query: Optional[str] = None,
-                        doc_type: Optional[str] = None) -> List[SourceDoc]:
+    async def _retrieve(self, route: dict, doc_type: Optional[str] = None) -> List[SourceDoc]:
         """Retrieve relevant documents, running the blocking work in a thread."""
-        return await asyncio.to_thread(self._retrieve_sync, query, code_query, doc_type)
+        return await asyncio.to_thread(self._retrieve_sync, route, doc_type)
 
-    async def _rewrite_queries(self, query: str) -> Tuple[str, str]:
-        """Rewrite the user query into (docs_query, code_query) via the LLM.
+    async def _rewrite(self, query: str) -> dict:
+        """Produce English search queries (docs_query + code_query) via the LLM.
 
-        Mirrors the skill's intent-understanding step: the raw query (often
-        Chinese/colloquial) is translated/expanded into English technical terms
-        for the documentation search AND into code-oriented terms for the
-        source-code search. Falls back to the raw query when the LLM is missing
-        or the rewrite fails.
+        No "docs vs code" mode is decided here — both databases are always
+        searched, so a wrong classification can never drop code or docs.
+        Falls back to the raw query when the LLM is missing or fails.
         """
         from scripts.api.llm import rewrite_queries
         try:
-            docs_query, code_query = await rewrite_queries(query)
+            route = await rewrite_queries(query)
         except Exception as e:
             logger.warning(f"Query rewrite failed, using raw query: {e}")
-            return query, query
-        return (docs_query or query), (code_query or query)
+            route = {}
+        route = dict(route or {})
+        route.setdefault("query", query)
+        if not route.get("docs_query"):
+            route["docs_query"] = query
+        if not route.get("code_query"):
+            route["code_query"] = query
+        return route
+
+    async def _judge_and_decompose(self, query: str, context: str) -> dict:
+        """LLM-judge whether `context` suffices to answer `query`; if not,
+        return decomposed sub-queries (the "dig deeper" step)."""
+        from scripts.api.llm import judge_and_decompose
+        try:
+            return await judge_and_decompose(query, context)
+        except Exception as e:
+            logger.warning(f"judge_and_decompose failed: {e}")
+            return {"sufficient": True}
+
+    async def _multi_search(self, sub_queries: List[str]) -> List[SourceDoc]:
+        """Search docs + code for each sub-query (respecting forced_mode)."""
+        import rag_api
+        mode = self.forced_mode or "auto"
+        try:
+            raw = await asyncio.to_thread(rag_api.multi_search, sub_queries, 10, None, mode)
+        except Exception as e:
+            logger.warning(f"multi_search failed: {e}")
+            return []
+        return self._to_sources(raw)
+
+    @staticmethod
+    def _merge_sources(existing: List[SourceDoc], extra: List[SourceDoc]) -> List[SourceDoc]:
+        """Dedupe and append extra sources onto existing.
+
+        Dedupes by chunk id when available, otherwise by (source, title,
+        section), so different chunks of the SAME document are preserved (e.g.
+        the TRM's "45 GPIO" chunk vs its "GPIO matrix" chunk).
+        """
+        seen = set()
+        for s in existing:
+            seen.add(s.chunk_id or (s.source_file, s.doc_title, s.section_path))
+        merged = list(existing)
+        for s in extra:
+            key = s.chunk_id or (s.source_file, s.doc_title, s.section_path)
+            if key not in seen:
+                seen.add(key)
+                merged.append(s)
+        return merged
+
+    async def _gather_sources(self, query: str, route: dict,
+                              doc_type: Optional[str] = None) -> List[SourceDoc]:
+        """Retrieve sources; when the query needs decomposition and the direct
+        answer is insufficient, dig deeper by searching sub-queries.
+
+        Mirrors the skill's "exhaust recall / re-search with different keywords"
+        behaviour, but driven automatically by the LLM.
+        """
+        sources = await self._retrieve(route, doc_type)
+
+        if route.get("needs_decompose"):
+            direct_ctx = self._build_context(sources)
+            decision = await self._judge_and_decompose(query, direct_ctx)
+            if not decision.get("sufficient", True) and decision.get("sub_queries"):
+                extra = await self._multi_search(decision["sub_queries"])
+                sources = self._merge_sources(sources, extra)
+
+        n_code = sum(1 for s in sources if s.doc_type == "code")
+        logger.info("retrieved %d sources (%d docs / %d code) for query: %s",
+                    len(sources), len(sources) - n_code, n_code, query)
+        return sources
 
     @staticmethod
     def _to_sources(results) -> List[SourceDoc]:
-        """Convert raw search result dicts to SourceDoc objects."""
+        """Convert raw search result dicts to SourceDoc objects.
+
+        Handles three result shapes:
+          * regular chunk results (docs/code) -> SourceDoc with text + source
+          * comparison results (type=="comparison") -> SourceDoc with the table
+          * spec results ({"doc_title", "specs": {...}}) -> SourceDoc with specs
+        """
         sources = []
         for r in results:
             if r.get('type') == 'comparison':
+                sources.append(SourceDoc(
+                    doc_title="Spec Comparison",
+                    doc_type="comparison",
+                    text=r.get('table', ''),
+                    score=0.0,
+                ))
+                continue
+            if 'specs' in r and 'text' not in r:
+                lines = [f"{k}: {v}" for k, v in (r.get('specs') or {}).items()]
+                sources.append(SourceDoc(
+                    doc_title=r.get('doc_title', ''),
+                    doc_type="spec",
+                    text="\n".join(lines),
+                    score=0.0,
+                ))
                 continue
             sources.append(SourceDoc(
                 doc_title=r.get('doc_title', ''),
@@ -202,21 +287,47 @@ class RAGChat:
                 score=float(r.get('score', 0)),
                 source_file=r.get('source', ''),
                 section_path=r.get('section_path', ''),
+                src_root=r.get('_src_root', ''),
+                chunk_id=r.get('id', ''),
             ))
         return sources
 
     def _build_context(self, sources: List[SourceDoc]) -> str:
-        """Build the context block from retrieved sources."""
+        """Build the context block from retrieved sources.
+
+        When a source chunk is a text/code file, also reads the source file to
+        append a deeper excerpt (mirrors the skill's source-file fallback).
+        Caps the number of sources so the LLM context stays focused.
+        """
+        import rag_api
+        max_sources = 60
         parts = []
-        for i, src in enumerate(sources, 1):
-            # Truncate very long chunks
+        seen_code = set()
+        for i, src in enumerate(sources):
+            if len(parts) >= max_sources:
+                break
             text = src.text
-            if len(text) > 2000:
-                text = text[:2000] + "..."
-            parts.append(
-                f"[{i}] {src.doc_title} ({src.doc_type})\n"
-                f"{text}"
-            )
+            if len(text) > 1500:
+                text = text[:1500] + "..."
+            # Collapse exact-duplicate source chunks (the same BSP driver copied
+            # into many examples) so one framework's code is not buried by many
+            # copies of another framework's code.
+            key = (src.doc_title, text)
+            if src.doc_type == "code" and key in seen_code:
+                continue
+            seen_code.add(key)
+            block = f"[{i}] {src.doc_title} ({src.doc_type})\n{text}"
+            if src.source_file:
+                try:
+                    excerpt = rag_api.read_source_file(
+                        src.source_file, max_chars=1500,
+                        extra_root=src.src_root or None)
+                except Exception:
+                    excerpt = ""
+                if excerpt:
+                    excerpt = re.sub(r'\n{3,}', '\n\n', excerpt).strip()
+                    block += f"\n> _Source file excerpt:_\n{excerpt[:900]}"
+            parts.append(block)
         return "\n\n---\n\n".join(parts)
 
     def _build_user_prompt(self, query: str, sources: List[SourceDoc]) -> str:
@@ -245,11 +356,10 @@ class RAGChat:
 
         session = self.get_session(session_id)
 
-        # Rewrite the query (translate/expand to English tech terms for docs and
-        # code), then retrieve with the rewritten queries. The original query is
-        # kept for the user-facing prompt and history.
-        docs_query, code_query = await self._rewrite_queries(query)
-        sources = await self._retrieve(docs_query, code_query, doc_type)
+        # Understand intent (rewrite to mode + English queries), then retrieve
+        # (with decompose-and-search fallback when no direct answer).
+        route = await self._rewrite(query)
+        sources = await self._gather_sources(query, route, doc_type)
 
         # Build prompt
         user_prompt = self._build_user_prompt(query, sources)
@@ -280,8 +390,9 @@ class RAGChat:
         """Ask a question with streaming response.
 
         Yields dicts with:
-            - type: "start" | "delta" | "sources" | "done" | "error"
-            - content: text content (for delta)
+            - type: "start" | "delta" | "sources" | "done" | "error" | "progress"
+            - content: text content (for delta / progress)
+            - stage: progress stage name (for progress)
             - data: additional data (for sources, done, etc.)
         """
         from scripts.api.llm import chat_completion_stream, LLMConfig
@@ -289,9 +400,13 @@ class RAGChat:
         try:
             session = self.get_session(session_id)
 
-            # Rewrite query then retrieve with the rewritten queries.
-            docs_query, code_query = await self._rewrite_queries(query)
-            sources = await self._retrieve(docs_query, code_query, doc_type)
+            # Understand intent (rewrite to English queries).
+            yield {"type": "progress", "stage": "rewrite", "content": "理解意图中…"}
+            route = await self._rewrite(query)
+
+            # Retrieve (with decompose-and-search fallback when no direct answer).
+            yield {"type": "progress", "stage": "retrieve", "content": "检索文档和代码中…"}
+            sources = await self._gather_sources(query, route, doc_type)
 
             # Send sources first
             sources_data = [
@@ -315,6 +430,7 @@ class RAGChat:
             config = LLMConfig()
             full_answer = []
             yield {"type": "start", "data": {"session_id": session.session_id}}
+            yield {"type": "progress", "stage": "answer", "content": "生成回答中…"}
 
             async for delta in chat_completion_stream(
                 system_prompt=SYSTEM_PROMPT,

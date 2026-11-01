@@ -12,13 +12,12 @@ Options:
     --top N            Return top N results (default: 10)
     --type <doc_type>  Filter by doc type (datasheet, trm, guide, api, safety, ...)
     --raw              JSON lines output (machine-readable)
-    --spec <name>      Look up structured spec data for named SoC
-    --compare <A,B>    Compare two SoCs by name
     --code             Query only the source-code database (config.yaml `code:`)
     --docs-only        Query only the documentation database
 
 By default a normal query searches BOTH the documentation database and the
-source-code database (when it exists) and merges the results.
+source-code database (when it exists) and merges the results. All queries go
+through raw retrieval (no spec/comparison detection).
 
 Environment:
     RAG_CHROMA_DIR  — ChromaDB persist directory
@@ -27,8 +26,6 @@ Environment:
 Examples:
     python3 agent.py "boot process" --top 5
     python3 agent.py "chip errata" --type docs
-    python3 agent.py --spec "ESP32-S3"
-    python3 agent.py --compare "ESP32-S3,ESP32-C3"
     python3 agent.py --raw "CAN bus configuration"
 """
 
@@ -64,75 +61,9 @@ for name in ['chromadb.segment.impl.metadata', 'chromadb.segment.impl.vector',
 
 import rag_api
 
-# ═══════════════════════════════════════════════════════════════════════
-# Source file reading (for deeper context when chunk text is insufficient)
-# ═══════════════════════════════════════════════════════════════════════
-
-def _source_roots() -> List[Path]:
-    """Candidate source roots, most specific first.
-
-    The DB stores *relative* paths, so the only thing that varies per machine
-    is the source root. Try the configured RAG_DOCS_DIR first, then the
-    portable defaults that ship inside the skill.
-    """
-    roots: List[Path] = []
-    env = os.environ.get('RAG_DOCS_DIR')
-    if env:
-        roots.append(Path(env))
-    roots.append(SKILL_DIR / 'source')
-    roots.append(SKILL_DIR / 'source_code')
-    seen = set()
-    out: List[Path] = []
-    for r in roots:
-        key = str(r).lower()
-        if key not in seen:
-            seen.add(key)
-            out.append(r)
-    return out
-
-
-def resolve_source_path(relpath: str, extra_root: Optional[str] = None) -> Path:
-    # Normalize separators so a Windows-built index resolves on Linux too.
-    parts = [p for p in re.split(r'[\\/]+', relpath) if p]
-    roots = _source_roots()
-    if extra_root:
-        roots = [Path(extra_root)] + [r for r in roots
-                                      if str(r).lower() != str(Path(extra_root)).lower()]
-    for root in roots:
-        if not parts:
-            break
-        candidate = root.joinpath(*parts)
-        if candidate.exists():
-            return candidate
-    # Fallback: locate the file by name anywhere under the roots.
-    if parts:
-        name = parts[-1]
-        for root in roots:
-            if root.is_dir():
-                try:
-                    for f in root.rglob(name):
-                        return f
-                except Exception:
-                    pass
-    base = roots[0] if roots else Path('.')
-    return base.joinpath(*parts) if parts else base
-
-
-def read_source_file(relpath: str, max_chars: int = 3000,
-                     extra_root: Optional[str] = None) -> str:
-    fpath = resolve_source_path(relpath, extra_root)
-    if not fpath.exists():
-        return ""
-    if fpath.suffix.lower() in ('.pdf', '.zip', '.xlsx'):
-        return ""
-    try:
-        text = fpath.read_text(encoding='utf-8', errors='replace')
-    except Exception:
-        return ""
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n\n... (truncated)"
-    return text
-
+# Source-file reading helpers now live in rag_api (shared with the web API).
+read_source_file = rag_api.read_source_file
+resolve_source_path = rag_api.resolve_source_path
 
 # ═══════════════════════════════════════════════════════════════════════
 # Output formatting
@@ -202,8 +133,6 @@ def main():
     raw = False
     top_n = 10
     doc_type = None
-    spec_name = None
-    compare_names = None
     code_mode = False
     docs_only = False
     query_parts = []
@@ -222,40 +151,11 @@ def main():
         elif args[i] == '--type' and i + 1 < len(args):
             doc_type = args[i + 1]
             i += 1
-        elif args[i] == '--spec' and i + 1 < len(args):
-            spec_name = args[i + 1]
-            i += 1
-        elif args[i] == '--compare' and i + 1 < len(args):
-            compare_names = [n.strip() for n in args[i + 1].split(',')]
-            i += 1
         else:
             query_parts.append(args[i])
         i += 1
 
     query_text = ' '.join(query_parts).strip()
-
-    # ── spec / comparison routes are documentation-only ──
-    if spec_name:
-        specs = rag_api.lookup_spec(spec_name)
-        if specs and specs[0].get('specs'):
-            spec = specs[0]
-            lines = [f"## {spec['doc_title']} Specifications\n"]
-            lines.append('| Feature | Value |')
-            lines.append('|---------|-------|')
-            for k, v in spec['specs'].items():
-                lines.append(f"| {k} | {v} |")
-            print('\n'.join(lines))
-        else:
-            print(f"No spec data found for '{spec_name}'")
-        return
-
-    if compare_names and len(compare_names) >= 2:
-        results = rag_api.compare(compare_names)
-        if results:
-            print(format_answer(results, raw=raw))
-        else:
-            print(f"No comparison data found for {compare_names}")
-        return
 
     if not query_text:
         print("Error: no query provided", file=sys.stderr)

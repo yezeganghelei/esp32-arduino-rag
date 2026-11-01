@@ -8,23 +8,26 @@ This is the SINGLE entry point for all query consumers:
   * scripts/api/server.py  (FastAPI web interface)
   * future MCP servers
 
-All retrieval logic lives here and only here — spec/comparison detection,
-the documentation + source-code dual search, and reciprocal-rank fusion —
-so every interface behaves identically. Do not re-implement search in the
-callers; import `search` / `lookup_spec` / `compare` from this module.
+All retrieval logic lives here and only here — the documentation + source-code
+raw search and reciprocal-rank fusion — so every interface behaves identically.
+Do not re-implement search in the callers; import `search` / `run_query` /
+`multi_search` from this module. There is no spec/comparison detection; all
+queries go through raw retrieval, and multi-entity questions are handled by the
+decompose-and-search flow in the chat layer.
 
-Modes (same as the skill's agent.py):
+Modes:
   * "auto"  — docs DB (chroma_esp32_all) + code DB (chroma_esp32_code), merged
   * "docs"  — documentation DB only
   * "code"  — source-code DB only
 """
 
 import os
+import re
 import sys
 import threading
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 # ── pysqlite3 patch (MUST be before any chromadb import) ────────────
 try:
@@ -51,8 +54,7 @@ for _name in ['chromadb.segment.impl.metadata', 'chromadb.segment.impl.vector',
               'chromadb.telemetry', 'chromadb.rate_limiting']:
     logging.getLogger(_name).setLevel(logging.ERROR)
 
-from main import (ChromaIndex, query as rag_query, _format_comparison,
-                  SOC_TO_DATASHEET)
+from main import ChromaIndex, query as rag_query
 
 logger = logging.getLogger("rag_api")
 
@@ -156,31 +158,6 @@ def warmup():
     logger.info("Model + index warm-up complete.")
 
 
-# ── Reciprocal-rank fusion (docs + code) ──────────────────────────────
-
-def _merge_results(docs_results: list, code_results: list, top_n: int) -> list:
-    """Merge documentation and code result lists by reciprocal-rank fusion.
-
-    Scores across two independent databases are not comparable, so fuse on
-    rank (same approach as the multi-collection RRF inside main.py).
-    """
-    if not code_results:
-        return docs_results[:top_n]
-    if not docs_results:
-        return code_results[:top_n]
-    merged = []
-    for i, r in enumerate(docs_results):
-        d = dict(r)
-        d['_rrf'] = 1.0 / (60.0 + i)
-        merged.append(d)
-    for i, r in enumerate(code_results):
-        d = dict(r)
-        d['_rrf'] = 1.0 / (60.0 + i)
-        merged.append(d)
-    merged.sort(key=lambda x: -x['_rrf'])
-    return merged[:top_n]
-
-
 # ── THE single search entry point ─────────────────────────────────────
 
 def search(query: str, top_n: int = 10, doc_type: Optional[str] = None,
@@ -198,8 +175,13 @@ def search(query: str, top_n: int = 10, doc_type: Optional[str] = None,
                     "auto" mode; falls back to `query` when not given).
 
     Returns:
-        (results, kind_used). kind_used is "docs" when a spec/comparison query
-        short-circuited to documentation-only, otherwise equals `mode`.
+        (results, kind_used).
+
+    NOTE: "auto" mode mirrors the skill's behaviour of running SEPARATE
+    documentation and code searches (agent.py --docs-only + agent.py --code).
+    The two result lists are CONCATENATED (docs first, then code) and each entry
+    is tagged with its own doc_type — no reciprocal-rank fusion, so code results
+    are not diluted by the documentation results.
     """
     if mode == 'docs':
         results = rag_query(get_doc_index(), query, n_results=top_n,
@@ -213,16 +195,16 @@ def search(query: str, top_n: int = 10, doc_type: Optional[str] = None,
             r['_src_root'] = code_docs
         return results, 'code'
 
-    # ── auto: docs + code, merged ──
+    # ── auto: docs search + code search, concatenated (no RRF fusion) ──
     docs_index = get_doc_index()
     docs_results = rag_query(docs_index, query, n_results=top_n, doc_type=doc_type)
 
-    # An auto-detected spec/comparison query is documentation-only.
-    if docs_results and docs_results[0].get('type') == 'comparison':
-        return docs_results, 'docs'
-
+    # The code DB is ALWAYS searched in auto mode. `doc_type` is a DOCUMENTATION
+    # type filter (datasheet/trm/guide/...), so it must not suppress the source
+    # code search — otherwise selecting a doc-type filter in the web UI would
+    # silently drop code results.
     code_results = []
-    if doc_type in (None, 'code') and has_code_index():
+    if has_code_index():
         try:
             code_docs, _ = _code_dirs()
             cq = code_query or query
@@ -233,40 +215,156 @@ def search(query: str, top_n: int = 10, doc_type: Optional[str] = None,
         except Exception:
             code_results = []
 
-    return _merge_results(docs_results, code_results, top_n), 'auto'
+    return docs_results + code_results, 'auto'
 
 
-# ── Structured spec lookup / comparison ──────────────────────────────
+# ── Routing: intent -> retrieval (always dual-search, no mode classification) ──
 
-def lookup_spec(name: str) -> list:
-    """Look up structured spec data for a named SoC (docs DB)."""
-    name_normalized = name.strip().upper().replace('-', ' ').strip()
-    index = get_doc_index()
-    result = index.lookup_specs(name_normalized)
-    if result:
-        return result
-    part_no = SOC_TO_DATASHEET.get(name_normalized)
-    if part_no:
-        result = index.lookup_specs(part_no)
-        if result:
-            return result
-    for soc_name, prefix in SOC_TO_DATASHEET.items():
-        if (soc_name in name_normalized
-                or name_normalized.replace(' ', '') in soc_name.replace(' ', '')):
-            result = index.lookup_specs(prefix)
-            if result:
-                return result
-    return []
+def run_query(route: dict, top_n: int = 10,
+              doc_type: Optional[str] = None,
+              forced_mode: Optional[str] = None) -> Tuple[list, str]:
+    """Route a rewrite decision to retrieval.
+
+    `route` is a dict with keys: docs_query, code_query, query.
+    By default BOTH the docs DB and the code DB are searched (docs_query for
+    docs, code_query for code), with the two result lists concatenated. This
+    avoids relying on the LLM to classify "docs vs code" (which was the source
+    of recurring errors where code/docs was dropped). `forced_mode` may be
+    "docs" or "code" to restrict the search (the web UI's explicit selector).
+    Returns (results, kind_used).
+    """
+    query = route.get("query") or ""
+
+    if forced_mode == "code":
+        return search(route.get("code_query") or query, top_n, doc_type, "code")
+
+    if forced_mode == "docs":
+        return search(route.get("docs_query") or query, top_n, doc_type, "docs")
+
+    return search(route.get("docs_query") or query, top_n, doc_type, "auto",
+                  route.get("code_query"))
 
 
-def compare(names: List[str]) -> list:
-    """Compare specs of two or more SoCs by name."""
-    specs_list = []
-    for name in names:
-        specs_list.extend(lookup_spec(name.strip()))
-    if len(specs_list) >= 2:
-        comparison_table = _format_comparison(specs_list)
-        if comparison_table:
-            return [{'type': 'comparison', 'table': comparison_table,
-                     'specs': specs_list}]
-    return []
+# ── Multi-search (decompose -> search each sub-query in BOTH DBs) ──────
+
+def multi_search(sub_queries: List[str], top_n: int = 10,
+                 doc_type: Optional[str] = None,
+                 mode: str = "auto") -> list:
+    """Run several focused searches (one per sub-query) and aggregate.
+
+    Each sub-query is a plain English phrase. `mode` controls which database(s)
+    each sub-query searches:
+      * "auto" -> docs DB + code DB (both, concatenated)
+      * "docs" -> docs DB only
+      * "code" -> code DB only
+    This mirrors the KB selector so a "docs"/"code" selection stays strict and
+    does not leak results from the other database during the decompose step.
+    Results are deduplicated by chunk id.
+    """
+    docs_index = get_doc_index()
+    code_index = None
+    if has_code_index():
+        try:
+            code_index = get_code_index()
+        except Exception:
+            code_index = None
+
+    merged: Dict[str, dict] = {}
+    order: List[str] = []
+    for sub in sub_queries:
+        if not isinstance(sub, str):
+            continue
+        q = sub.strip()
+        if not q:
+            continue
+        results = []
+        if mode in ("auto", "docs"):
+            try:
+                results = docs_index.search(q, n_results=top_n, doc_type=doc_type)
+            except Exception:
+                results = []
+        if mode in ("auto", "code") and code_index is not None:
+            try:
+                code_results = code_index.search(q, n_results=top_n, doc_type='code')
+                for r in code_results:
+                    r['_src_root'] = _code_dirs()[0]
+                results = results + code_results
+            except Exception:
+                pass
+        for r in results:
+            if r.get('type') == 'comparison':
+                continue
+            rid = r.get('id') or (r.get('source') + '|' + r.get('doc_title') + '|' + r.get('text', '')[:40])
+            if rid not in merged:
+                merged[rid] = r
+                order.append(rid)
+    return [merged[rid] for rid in order]
+
+
+# ── Source-file reading (for deeper context when chunk text is insufficient) ──
+
+def _source_roots() -> List[Path]:
+    """Candidate source roots, most specific first.
+
+    The DB stores *relative* paths, so the only thing that varies per machine
+    is the source root. Try the configured RAG_DOCS_DIR first, then the
+    portable defaults that ship inside the skill.
+    """
+    roots: List[Path] = []
+    env = os.environ.get('RAG_DOCS_DIR')
+    if env:
+        roots.append(Path(env))
+    roots.append(SKILL_DIR / 'source')
+    roots.append(SKILL_DIR / 'source_code')
+    seen = set()
+    out: List[Path] = []
+    for r in roots:
+        key = str(r).lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def resolve_source_path(relpath: str, extra_root: Optional[str] = None) -> Path:
+    # Normalize separators so a Windows-built index resolves on Linux too.
+    parts = [p for p in re.split(r'[\\/]+', relpath) if p]
+    roots = _source_roots()
+    if extra_root:
+        roots = [Path(extra_root)] + [r for r in roots
+                                      if str(r).lower() != str(Path(extra_root)).lower()]
+    for root in roots:
+        if not parts:
+            break
+        candidate = root.joinpath(*parts)
+        if candidate.exists():
+            return candidate
+    # Fallback: locate the file by name anywhere under the roots.
+    if parts:
+        name = parts[-1]
+        for root in roots:
+            if root.is_dir():
+                try:
+                    for f in root.rglob(name):
+                        return f
+                except Exception:
+                    pass
+    base = roots[0] if roots else Path('.')
+    return base.joinpath(*parts) if parts else base
+
+
+def read_source_file(relpath: str, max_chars: int = 3000,
+                     extra_root: Optional[str] = None) -> str:
+    """Read a source file referenced by a search result, if it is a text file."""
+    fpath = resolve_source_path(relpath, extra_root)
+    if not fpath.exists():
+        return ""
+    if fpath.suffix.lower() in ('.pdf', '.zip', '.xlsx'):
+        return ""
+    try:
+        text = fpath.read_text(encoding='utf-8', errors='replace')
+    except Exception:
+        return ""
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n... (truncated)"
+    return text
