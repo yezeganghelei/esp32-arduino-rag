@@ -5,6 +5,7 @@
 #   2. docker-compose up -d --build
 #   3. Web chat UI:  http://localhost:7860
 #      API docs:     http://localhost:8000/docs
+#      MCP (SSE):    http://localhost:8001/sse
 #
 # Rebuild after code changes:
 #   docker-compose up -d --build
@@ -25,6 +26,7 @@ services:
     ports:
       - "8000:8000"     # FastAPI / HTTP API
       - "7860:7860"     # Gradio web chat UI
+      - "8001:8001"     # MCP Server (SSE) for AI clients
     environment:
       - TRANSFORMERS_OFFLINE=1
       - HF_HUB_OFFLINE=1

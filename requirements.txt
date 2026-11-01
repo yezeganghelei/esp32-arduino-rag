@@ -50,3 +50,8 @@ aiohttp==3.10.5
 # ── Web UI / Chat (added for Phase 2) ──────────────────────────────
 # Gradio — web chat interface (4.x LTS, stable)
 gradio==4.44.1
+
+# ── MCP Server (added for Phase 3) ─────────────────────────────────
+# Model Context Protocol SDK (FastMCP) — exposes RAG retrieval to AI clients.
+# Pin to <2: mcp 2.x renamed FastMCP -> MCPServer and changed the API.
+mcp>=1.6.0,<2.0

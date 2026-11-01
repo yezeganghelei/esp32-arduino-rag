@@ -3,7 +3,8 @@
 # Modes:
 #   server           → start FastAPI server (port 8000)
 #   web              → start Gradio web UI (port 7860)
-#   all              → start both API server + web UI
+#   mcp              → start MCP server (SSE, port 8001)
+#   all              → start API server + web UI + MCP server
 #   build            → run incremental index build
 #   anything else    → pass through to agent.py (query mode)
 
@@ -24,6 +25,10 @@ case "$1" in
         shift
         exec python -m scripts.web.app "$@"
         ;;
+    mcp)
+        shift
+        exec python -m scripts.mcp.server --transport sse --host 0.0.0.0 --port 8001 "$@"
+        ;;
     all)
         shift
         # Start API server in background
@@ -33,17 +38,21 @@ case "$1" in
             --workers 1 &
         API_PID=$!
 
+        # Start MCP server in background
+        python -m scripts.mcp.server --transport sse --host 0.0.0.0 --port 8001 &
+        MCP_PID=$!
+
         # Start web UI in foreground
         python -m scripts.web.app "$@" &
         WEB_PID=$!
 
         # Wait for any process to exit
-        wait -n $API_PID $WEB_PID
+        wait -n $API_PID $MCP_PID $WEB_PID
         EXIT_CODE=$?
 
-        # Clean up the other process
-        kill $API_PID $WEB_PID 2>/dev/null || true
-        wait $API_PID $WEB_PID 2>/dev/null || true
+        # Clean up the other processes
+        kill $API_PID $MCP_PID $WEB_PID 2>/dev/null || true
+        wait $API_PID $MCP_PID $WEB_PID 2>/dev/null || true
 
         exit $EXIT_CODE
         ;;
