@@ -145,14 +145,15 @@ class RAGChat:
         """Clear conversation history for a session."""
         self._store.delete(session_id)
 
-    def _retrieve_sync(self, query: str, doc_type: Optional[str] = None) -> List[SourceDoc]:
+    def _retrieve_sync(self, query: str, code_query: Optional[str] = None,
+                       doc_type: Optional[str] = None) -> List[SourceDoc]:
         """Retrieve relevant documents from the index (or a custom retriever).
 
         Runs synchronously; call via _retrieve() so it executes off the
         event-loop thread and does not block other requests.
         """
         if self._retriever is not None:
-            raw_results = self._retriever(query, doc_type, self.top_k)
+            raw_results = self._retriever(query, code_query, doc_type, self.top_k)
         else:
             # Import here to avoid circular imports
             from main import query as rag_query
@@ -165,9 +166,27 @@ class RAGChat:
 
         return self._to_sources(raw_results)
 
-    async def _retrieve(self, query: str, doc_type: Optional[str] = None) -> List[SourceDoc]:
+    async def _retrieve(self, query: str, code_query: Optional[str] = None,
+                        doc_type: Optional[str] = None) -> List[SourceDoc]:
         """Retrieve relevant documents, running the blocking work in a thread."""
-        return await asyncio.to_thread(self._retrieve_sync, query, doc_type)
+        return await asyncio.to_thread(self._retrieve_sync, query, code_query, doc_type)
+
+    async def _rewrite_queries(self, query: str) -> Tuple[str, str]:
+        """Rewrite the user query into (docs_query, code_query) via the LLM.
+
+        Mirrors the skill's intent-understanding step: the raw query (often
+        Chinese/colloquial) is translated/expanded into English technical terms
+        for the documentation search AND into code-oriented terms for the
+        source-code search. Falls back to the raw query when the LLM is missing
+        or the rewrite fails.
+        """
+        from scripts.api.llm import rewrite_queries
+        try:
+            docs_query, code_query = await rewrite_queries(query)
+        except Exception as e:
+            logger.warning(f"Query rewrite failed, using raw query: {e}")
+            return query, query
+        return (docs_query or query), (code_query or query)
 
     @staticmethod
     def _to_sources(results) -> List[SourceDoc]:
@@ -226,8 +245,11 @@ class RAGChat:
 
         session = self.get_session(session_id)
 
-        # Retrieve relevant docs
-        sources = await self._retrieve(query, doc_type)
+        # Rewrite the query (translate/expand to English tech terms for docs and
+        # code), then retrieve with the rewritten queries. The original query is
+        # kept for the user-facing prompt and history.
+        docs_query, code_query = await self._rewrite_queries(query)
+        sources = await self._retrieve(docs_query, code_query, doc_type)
 
         # Build prompt
         user_prompt = self._build_user_prompt(query, sources)
@@ -267,8 +289,9 @@ class RAGChat:
         try:
             session = self.get_session(session_id)
 
-            # Retrieve relevant docs
-            sources = await self._retrieve(query, doc_type)
+            # Rewrite query then retrieve with the rewritten queries.
+            docs_query, code_query = await self._rewrite_queries(query)
+            sources = await self._retrieve(docs_query, code_query, doc_type)
 
             # Send sources first
             sources_data = [

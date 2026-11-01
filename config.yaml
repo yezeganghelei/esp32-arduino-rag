@@ -22,7 +22,7 @@ code:
   # libraries; KEEPS the examples' own code and the board `components/BSP`
   # drivers.
   exclude_dirs: [build, .git, managed_components, .venv, node_modules,
-                 espressif__*, tinyusb_src, esp32-camera, decoder_ijg,
+                 espressif__*, tinyusb, tinyusb_src, esp32-camera, decoder_ijg,
                  MJPEG, LVGL, led_strip]
   # Collapse identical code files (BSP drivers are copied per example).
   # false = keep every copy (all remaining example code imported).

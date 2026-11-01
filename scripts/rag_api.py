@@ -184,7 +184,7 @@ def _merge_results(docs_results: list, code_results: list, top_n: int) -> list:
 # ── THE single search entry point ─────────────────────────────────────
 
 def search(query: str, top_n: int = 10, doc_type: Optional[str] = None,
-           mode: str = 'auto') -> Tuple[list, str]:
+           mode: str = 'auto', code_query: Optional[str] = None) -> Tuple[list, str]:
     """Search the knowledge base.
 
     Args:
@@ -194,6 +194,8 @@ def search(query: str, top_n: int = 10, doc_type: Optional[str] = None,
                   code). When set to anything other than None/"code", the code
                   DB is skipped (documentation-only), matching agent.py.
         mode: "auto" | "docs" | "code".
+        code_query: optional code-oriented search text (used for the code DB in
+                    "auto" mode; falls back to `query` when not given).
 
     Returns:
         (results, kind_used). kind_used is "docs" when a spec/comparison query
@@ -223,7 +225,8 @@ def search(query: str, top_n: int = 10, doc_type: Optional[str] = None,
     if doc_type in (None, 'code') and has_code_index():
         try:
             code_docs, _ = _code_dirs()
-            code_results = get_code_index().search(query, n_results=top_n,
+            cq = code_query or query
+            code_results = get_code_index().search(cq, n_results=top_n,
                                                    doc_type='code')
             for r in code_results:
                 r['_src_root'] = code_docs

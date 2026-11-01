@@ -65,6 +65,7 @@ class SearchRequest(BaseModel):
     doc_type: Optional[str] = Field(None, description="Filter by document type (datasheet, trm, guide, api, safety, release_notes, specification, docs, code)")
     hybrid: bool = Field(True, description="Enable BM25 hybrid retrieval")
     rerank: bool = Field(True, description="Enable cross-encoder reranking")
+    rewrite: bool = Field(True, description="Rewrite the query into English search keywords via the LLM before retrieval")
 
 
 class SearchResult(BaseModel):
@@ -212,9 +213,23 @@ async def search(req: SearchRequest, kind: str = Query("auto", description="Inde
 
     start = time.time()
 
+    docs_query = req.query
+    code_query = req.query
+    if req.rewrite:
+        try:
+            from scripts.api.llm import rewrite_queries
+            dq, cq = await rewrite_queries(req.query)
+            if dq and dq.strip():
+                docs_query = dq.strip()
+            if cq and cq.strip():
+                code_query = cq.strip()
+        except Exception:
+            docs_query = req.query
+            code_query = req.query
+
     try:
         results, used_kind = await asyncio.to_thread(
-            rag_api.search, req.query, req.top_n, req.doc_type, kind)
+            rag_api.search, docs_query, req.top_n, req.doc_type, kind, code_query)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
@@ -222,6 +237,8 @@ async def search(req: SearchRequest, kind: str = Query("auto", description="Inde
 
     return {
         'query': req.query,
+        'rewritten_docs_query': docs_query if docs_query != req.query else None,
+        'rewritten_code_query': code_query if code_query != req.query else None,
         'kind': used_kind,
         'results': normalized,
         'total': len(normalized),
@@ -317,8 +334,8 @@ def get_chat(kind: str = "docs"):
     if kind not in _chat_engines:
         from scripts.api.chat import RAGChat
         if kind == "auto":
-            def _retriever(query, doc_type=None, top_k=8):
-                results, _ = rag_api.search(query, top_k, doc_type, 'auto')
+            def _retriever(query, code_query=None, doc_type=None, top_k=8):
+                results, _ = rag_api.search(query, top_k, doc_type, 'auto', code_query)
                 return results
             _chat_engines[kind] = RAGChat(index=None, top_k=8, retriever=_retriever)
         else:
