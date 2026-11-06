@@ -256,30 +256,10 @@ class RAGChat:
     def _to_sources(results) -> List[SourceDoc]:
         """Convert raw search result dicts to SourceDoc objects.
 
-        Handles three result shapes:
-          * regular chunk results (docs/code) -> SourceDoc with text + source
-          * comparison results (type=="comparison") -> SourceDoc with the table
-          * spec results ({"doc_title", "specs": {...}}) -> SourceDoc with specs
+        Converts regular chunk results (docs/code) to SourceDoc with text + source.
         """
         sources = []
         for r in results:
-            if r.get('type') == 'comparison':
-                sources.append(SourceDoc(
-                    doc_title="Spec Comparison",
-                    doc_type="comparison",
-                    text=r.get('table', ''),
-                    score=0.0,
-                ))
-                continue
-            if 'specs' in r and 'text' not in r:
-                lines = [f"{k}: {v}" for k, v in (r.get('specs') or {}).items()]
-                sources.append(SourceDoc(
-                    doc_title=r.get('doc_title', ''),
-                    doc_type="spec",
-                    text="\n".join(lines),
-                    score=0.0,
-                ))
-                continue
             sources.append(SourceDoc(
                 doc_title=r.get('doc_title', ''),
                 doc_type=r.get('doc_type', ''),

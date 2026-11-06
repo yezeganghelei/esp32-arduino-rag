@@ -61,8 +61,6 @@ def _format_results(results: list, max_text: int = 500) -> str:
         return "(no results)"
     lines = []
     for i, r in enumerate(results, 1):
-        if r.get('type') == 'comparison':
-            continue
         lines.append(
             f"[{i}] [{r.get('doc_type', '')}] {r.get('doc_title', '')} "
             f"(score={round(float(r.get('score', 0)), 4)})"

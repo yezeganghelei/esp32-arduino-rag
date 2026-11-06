@@ -3116,10 +3116,6 @@ def interactive(index: ChromaIndex):
                 print("  /help             — show this help")
             continue
         results = query(index, q, doc_type=current_type)
-        # Handle comparison results
-        if results and results[0].get('type') == 'comparison':
-            print(f"\n{results[0]['table']}\n")
-            continue
         print(f"\nTop {len(results)} results" +
               (f" (type: {current_type})" if current_type else "") + ":\n")
         for r in results:
@@ -3156,12 +3152,6 @@ if __name__ == '__main__':
         if query_args:
             q = " ".join(query_args)
             results = query(idx, q, doc_type=doc_type)
-            # Handle comparison results
-            if results and results[0].get('type') == 'comparison':
-                print(f"\nQuery: {q}\n")
-                print(results[0]['table'])
-                print()
-                sys.exit(0)
             print(f"\nQuery: {q}\n")
             for r in results:
                 parts = []

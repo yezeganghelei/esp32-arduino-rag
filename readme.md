@@ -140,17 +140,6 @@ When no document type is specified, all collections are searched and the results
 RRF_score(d) = Σ 1/(60 + rank(d, collection_i))
 ```
 
-### 3.6 Cross-document Spec Comparison
-
-Structured spec extraction is implemented for datasheets:
-
-- Automatically detect the "SoC Features" table
-- Extract key-value pairs for CPU, memory, peripheral interfaces, and other key specs
-- Store them in a separate `spec_summary` collection
-- Support queries in the form "esp32 vs esp32-s3", generating a Markdown comparison table automatically
-
-The SoC name to datasheet number mapping is configured under `soc_to_datasheet` in `config.yaml`.
-
 ### 3.7 Three-stage Retrieval Pipeline
 
 **Phase 1 — Dense Retrieval**: vectorize the query with `bge-base-en-v1.5` (configurable via `models.dense.default` in config.yaml or switched at build time with `--model`), search across the ChromaDB collections, fuse multi-collection results with RRF, and expand the candidate set to `n_results × 3~4`.
@@ -246,19 +235,17 @@ Searching, formatting, and source-file reading are wrapped into a single Bash ca
 
 ```bash
 cd <skill_dir>/scripts
-python3 agent.py "<query>" [--top N] [--type <doc_type>] [--raw] [--spec <SoC>] [--compare <A,B>] [--code] [--docs-only]
+python3 agent.py "<query>" [--top N] [--type <doc_type>] [--raw] [--code] [--docs-only]
 ```
 
 Parameters:
 - `--top N` : return the top N results (default 10)
 - `--type <doc_type>` : filter by document type (datasheet, trm, guide, api, safety, release_notes, specification, docs)
 - `--raw` : JSON lines output (machine-readable)
-- `--spec <name>` : look up structured spec data for a SoC (e.g. `esp32-s3`)
-- `--compare <A,B>` : compare the specs of two SoCs (e.g. `esp32-s3,esp32`)
 - `--code` : query **only** the source-code database (see §6.5); doc type defaults to `code`
 - `--docs-only` : query **only** the documentation database
 
-**Default behavior** (no `--code` / `--docs-only`): a normal query searches **both** databases and merges the results by reciprocal-rank fusion, so code chunks (tagged `[code]`) surface automatically even when the query contains no explicit "code" keyword (e.g. "how to configure LEDC PWM"). `--spec` / `--compare` and any `--type` other than `code` remain documentation-only. Use `--docs-only` to suppress code noise for pure spec/register questions, and `--code` when only code is wanted.
+**Default behavior** (no `--code` / `--docs-only`): a normal query searches **both** databases and merges the results by reciprocal-rank fusion, so code chunks (tagged `[code]`) surface automatically even when the query contains no explicit "code" keyword (e.g. "how to configure LEDC PWM"). Any `--type` other than `code` remains documentation-only. Use `--docs-only` to suppress code noise for pure spec/register questions, and `--code` when only code is wanted.
 
 **Output notes**: the agent outputs in human-readable form by default; each result contains the chunk text (the `text` field) plus an excerpt from the corresponding non-PDF/ZIP/XLSX source file. If the agent output already includes an excerpt, prefer it over digging into the source file directly.
 
@@ -500,7 +487,6 @@ All document-related configuration is managed centrally in `config.yaml`:
 | Config item | Description | Purpose |
 |--------|------|------|
 | `models` | Embedding and reranking model configuration | Specify the default model in `config.yaml`; switch at build time with `--model` |
-| `soc_to_datasheet` | SoC name → Datasheet number mapping | Find the corresponding datasheet by SoC name for comparison and spec queries |
 | `doc_type_rules` | Path keyword → document type rules | Automatic classification during document extraction |
 | `weight_rules` | Path keyword → search weight | Affects BM25/vector retrieval ranking |
 | `collection_map` | Document type → ChromaDB collection name | Multi-collection routing isolation |
@@ -553,7 +539,6 @@ To add a new SoC or adjust classification rules or weights, just edit `config.ya
 | Table handling | Standalone chunks + metadata markers + Table-to-Text serialization | Tables are information-dense and need special protection; NL serialization improves embedding comprehension |
 | Retrieval enhancement | BM25 + Dense Hybrid + Cross-Encoder Reranker | Three stages: dense semantics → BM25 exactness → cross-encoder fine ranking |
 | Error-code search | Automatic BM25 boost for hex codes + forced result injection | Dense vectors cannot match hex error codes/register patterns; BM25 matches tokens exactly and then weights them |
-| Cross-document comparison | Structured spec extraction + spec_summary | Datasheet feature tables have a stable structure, enabling automated comparison |
 | Incremental build | MD5 content hash + deletion detection | No need to re-index unchanged documents; MD5 is more reliable than mtime |
 | Build-stage separation | File inventory scan → compare → stream processing | Phase 1 is pure filesystem work (<1s); only Phase 3 does the expensive extraction + embedding |
 | Memory management | Streaming, one document at a time | Avoids OOM on large corpora |

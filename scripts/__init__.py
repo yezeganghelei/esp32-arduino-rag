@@ -269,13 +269,6 @@ def cmd_query(argv):
 
         results = _query(idx, q, doc_type=doc_type)
 
-        # Handle comparison results
-        if results and results[0].get('type') == 'comparison':
-            print(f"\nQuery: {q}\n")
-            print(results[0]['table'])
-            print()
-            return results
-
         if xlsx_results:
             print(f"\nQuery: {q}\n")
             print(f"  === Error ID Reference Match ===\n")

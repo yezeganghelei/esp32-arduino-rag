@@ -9,6 +9,10 @@
 # Core RAG pipeline
 sentence-transformers==3.2.1
 chromadb==0.4.24
+# Pin transitive deps: grpcio 1.83.1's unsigned cygrpc.pyd is blocked by Windows
+# Smart App Control, and protobuf 7.x breaks the grpcio Cython ABI.
+grpcio==1.66.2
+protobuf==6.33.6
 chroma-hnswlib==0.7.3
 rank-bm25==0.2.2
 

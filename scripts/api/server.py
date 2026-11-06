@@ -7,8 +7,6 @@ Provides HTTP API endpoints for the ESP32 RAG knowledge base.
 Endpoints:
     GET  /health              — health check + basic stats
     POST /api/search          — search the documentation index
-    GET  /api/spec/{soc}      — look up structured specs for a SoC
-    GET  /api/compare         — compare specs of two SoCs
     GET  /api/stats           — index statistics
 
 Run:
@@ -22,7 +20,7 @@ import asyncio
 import threading
 import logging
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -82,23 +80,6 @@ class SearchResponse(BaseModel):
     results: List[SearchResult]
     total: int
     elapsed_ms: float
-
-
-class ComparisonResponse(BaseModel):
-    type: str = "comparison"
-    table: str
-    specs: List[Dict[str, Any]]
-
-
-class SpecEntry(BaseModel):
-    feature: str
-    value: str
-
-
-class SpecResponse(BaseModel):
-    soc: str
-    doc_title: str
-    specs: List[SpecEntry]
 
 
 class StatsResponse(BaseModel):
@@ -214,9 +195,8 @@ async def search(req: SearchRequest, kind: str = Query("auto", description="Inde
     start = time.time()
 
     # The search endpoint is the raw-search analog of agent.py's default search
-    # (kind = auto/docs/code). Spec/compare are separate endpoints, matching the
-    # skill's --spec / --compare commands. The rewrite only translates the query;
-    # it does not change the search kind here.
+    # (kind = auto/docs/code). The rewrite only translates the query; it does
+    # not change the search kind here.
     docs_query = req.query
     code_query = req.query
     if req.rewrite:
@@ -235,7 +215,7 @@ async def search(req: SearchRequest, kind: str = Query("auto", description="Inde
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
-    normalized = [_result_to_dict(r) for r in results if r.get('type') != 'comparison']
+    normalized = [_result_to_dict(r) for r in results]
 
     return {
         'query': req.query,

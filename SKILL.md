@@ -6,13 +6,9 @@ user_prompt: |
 
   Usage:
     esp-rag <search query>        # general semantic search
-    esp-rag --spec <SoC name>     # look up chip specifications
-    esp-rag --compare <A,B>       # compare two chips
 
   Examples:
     esp-rag esp32-s3 boot process
-    esp-rag --spec esp32-s3
-    esp-rag --compare esp32-s3,esp32
 ---
 
 Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index.
@@ -41,12 +37,6 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
    ```bash
    # General search (searches BOTH the documentation DB and the code DB, merged)
    python <skill_dir>/scripts/agent.py "<query>" [--top N] [--type <doc_type>]
-
-   # Structured spec lookup (e.g. "esp32-s3 GPU specs")
-   python <skill_dir>/scripts/agent.py --spec "<SoC name>"
-
-   # Chip comparison (e.g. "difference between esp32-s3 and esp32")
-   python <skill_dir>/scripts/agent.py --compare "<SoC_A>,<SoC_B>"
    ```
 
    Parameters:
@@ -54,12 +44,10 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
    - `--type <doc_type>` : filter by document type (datasheet, trm, guide, api, safety, release_notes, specification, docs)
      Note: error-code references (e.g. chip errata) have doc type `docs`, not `trm`. However, error-code queries usually do not need a type filter; the RAG engine's BM25 hex boosting automatically prioritizes reference tables that contain error codes.
    - `--raw` : JSON lines output (machine-readable)
-   - `--spec <name>` : look up structured spec data for a SoC (e.g. "esp32-s3")
-   - `--compare <A,B>` : compare the specs of two SoCs (e.g. "esp32-s3,esp32")
    - `--code` : query **only** the source-code database (uses `code.docs_dir` / `code.chroma_dir` from config.yaml); doc type defaults to `code`.
    - `--docs-only` : query **only** the documentation database (the default behavior before the code DB was added).
 
-   **Default behavior** (no `--code` / `--docs-only`): a normal query searches **both** databases and merges the results by reciprocal-rank fusion, so code chunks (tagged `[code]`) appear automatically even when the query has no explicit "code" keyword (e.g. "how to configure LEDC PWM"). Spec/comparison routes (`--spec`, `--compare`) and any `--type` filter other than `code` remain documentation-only. Use `--docs-only` for pure spec/register questions where code results would be noise, and `--code` when only code is wanted.
+   **Default behavior** (no `--code` / `--docs-only`): a normal query searches **both** databases and merges the results by reciprocal-rank fusion, so code chunks (tagged `[code]`) appear automatically even when the query has no explicit "code" keyword (e.g. "how to configure LEDC PWM"). Any `--type` filter other than `code` remains documentation-only. Use `--docs-only` for pure spec/register questions where code results would be noise, and `--code` when only code is wanted.
 
    **Examples:**
    ```bash
@@ -68,12 +56,6 @@ Search the ESP32 documentation knowledge base using a ChromaDB-powered RAG index
 
    # Error-code query — no --type needed; a default search hits the reference tables containing error codes
    python <skill_dir>/scripts/agent.py "0x3000"
-
-   # Spec lookup
-   python <skill_dir>/scripts/agent.py --spec "esp32-s3"
-
-   # Chip comparison
-   python <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"
 
    # JSON output
    python <skill_dir>/scripts/agent.py "bootrom" --raw
@@ -141,7 +123,6 @@ python -m scripts.build.run --model all-MiniLM-L6-v2
 - **Low-value content filtering**: register dumps, hex-dense lines, bare "Table N" headings and other low-information content are filtered out automatically.
 - **BM25 persistent cache**: the BM25 index is rebuilt from ChromaDB on first search and cached as `.chroma_esp32_all/_bm25_cache.pkl` (size varies with the corpus); subsequent searches load the cache directly (~1s). The cache is refreshed incrementally when the index is updated. On load, the cache validates document-count consistency and rebuilds if inconsistent (solving the stale-cache problem).
 - **XLSX blank-row filtering**: when processing XLSX tables, all-empty rows and pure decoration rows (e.g. `---|---|---`) are filtered out, reducing invalid chunks.
-- **Comparison queries**: queries like "esp32-s3 vs esp32" are detected automatically, and structured spec data is extracted directly from the `spec_summary` collection for comparison.
 
 ## Important rules
 
@@ -152,7 +133,6 @@ python -m scripts.build.run --model all-MiniLM-L6-v2
 - **Distinguish "not found by this search" from "not present in the documents"**: a fact being absent from the top-N chunks means the search missed it, not that the document lacks it. When the retrieved chunk only shows a module name without the value (e.g. a block diagram listing `GPIO`), do NOT record it as "count not in retrieved specs" — issue a dedicated query for that value first.
 - **Do not contradict a previously retrieved fact**: once a value has been retrieved from the documents, reuse it consistently in later answers/tables rather than marking the field as unknown.
 - When accessing source files, **always use the `<skill_dir>/source/` relative path**; do not use absolute paths.
-- For cross-document comparison queries (e.g. "difference between esp32 and esp32-s3"), you **must** use the `--compare` flag: `python <skill_dir>/scripts/agent.py --compare "esp32-s3,esp32"`. Do not do a plain search, otherwise you get scattered passages instead of a complete comparison.
 - For error-code queries, it is best to combine the key hexadecimal value with the module name. Note: the RAG engine's BM25 hex boosting automatically prioritizes reference tables containing error codes (type `docs`), so no `--type` is needed.
 - **After a forced index rebuild, you must delete the BM25 cache**: if the `.chroma_esp32_all/` directory was not emptied during the rebuild (e.g. only `chroma.sqlite3` was deleted but not the whole directory), the BM25 cache file `_bm25_cache.pkl` may remain. That cache is built from the document IDs of the chunks collection; if the chunks collection changes but the cache is not updated, BM25 retrieval will return wrong or empty results. Solution:
   Linux / macOS:

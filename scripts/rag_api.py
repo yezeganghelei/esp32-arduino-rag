@@ -292,8 +292,6 @@ def multi_search(sub_queries: List[str], top_n: int = 10,
             except Exception:
                 pass
         for r in results:
-            if r.get('type') == 'comparison':
-                continue
             rid = r.get('id') or (r.get('source') + '|' + r.get('doc_title') + '|' + r.get('text', '')[:40])
             if rid not in merged:
                 merged[rid] = r

@@ -74,12 +74,6 @@ def format_answer(results, query_text: str = "", raw: bool = False) -> str:
         msg = "No relevant results found."
         return json.dumps({"query": query_text, "results": []}) if raw else msg
 
-    if results[0].get('type') == 'comparison':
-        table = results[0]['table']
-        if raw:
-            return json.dumps({"type": "comparison", "table": table})
-        return table
-
     if raw:
         output = []
         for r in results:
