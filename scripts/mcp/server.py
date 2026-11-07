@@ -20,8 +20,10 @@ Environment:
     RAG_CODE_DOCS_DIR (auto-detected under the skill dir when unset).
 """
 
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +54,58 @@ os.environ.setdefault('RAG_CODE_DOCS_DIR', str(SKILL_DIR / 'source_code'))
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['HF_HUB_OFFLINE'] = '1'
 
+# Load .env AFTER the RAG path defaults above, so the Docker paths in .env do
+# not override the local defaults; only the LLM config (LLM_API_KEY / ...) is
+# picked up when not running under docker-compose.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(SKILL_DIR / '.env')
+except Exception:
+    pass
+
+# ── Logging ─────────────────────────────────────────────────────────────
+# NEVER log to stdout: in stdio transport stdout is reserved for JSON-RPC, so a
+# stray log line there would corrupt the protocol. Logs go to stderr plus a file
+# (the file survives stdio clients that discard stderr, e.g. test_client.py).
+_log_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+
+
+def _build_logger() -> logging.Logger:
+    logger = logging.getLogger("esp_rag_mcp")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    if logger.handlers:
+        return logger
+
+    _sh = logging.StreamHandler(sys.stderr)
+    _sh.setLevel(logging.INFO)
+    _sh.setFormatter(_log_fmt)
+    logger.addHandler(_sh)
+
+    try:
+        _log_dir = Path(os.environ.get("MCP_LOG_DIR", str(SKILL_DIR / "logs")))
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        _log_file = os.environ.get("MCP_LOG_FILE", str(_log_dir / "mcp.log"))
+        _fh = logging.FileHandler(_log_file, encoding="utf-8")
+        _fh.setLevel(logging.DEBUG)
+        _fh.setFormatter(_log_fmt)
+        logger.addHandler(_fh)
+    except Exception as _e:  # pragma: no cover
+        sys.stderr.write(f"mcp: log file setup failed: {_e}\n")
+
+    return logger
+
+
+log = _build_logger()
+
+# Pre-import the heavy RAG deps (chromadb / torch) in the MAIN thread at startup.
+# Without this, the lazy `import rag_api` inside a tool call runs in FastMCP's
+# worker thread and can deadlock on Windows.
+_t0 = time.time()
+import rag_api  # noqa: E402
+from scripts.api.chat import rag_answer, format_rag_answer  # noqa: E402
+log.info("rag deps imported in %.2fs", time.time() - _t0)
+
 mcp = FastMCP("esp-rag")
 
 
@@ -75,54 +129,76 @@ def _format_results(results: list, max_text: int = 500) -> str:
 
 
 @mcp.tool()
-def search_esp_docs(query: str, top_n: int = 10,
-                    doc_type: Optional[str] = None) -> str:
-    """Search the ESP32 documentation knowledge base (datasheets, TRM, guides).
+async def search_esp_docs(query: str, top_n: int = 10,
+                          doc_type: Optional[str] = None) -> str:
+    """Answer a question from the ESP32 documentation knowledge base.
 
+    Uses the SAME RAG flow as the web chat (LLM rewrite + retrieval + answer).
     Use this for facts, concepts, architecture, register/spec/interface counts.
 
     Args:
-        query: search text (Chinese or English). Use English technical terms
-               (e.g. "clock source PLL XTAL") for best recall.
-        top_n: number of results to return (1-20).
+        query: question text (Chinese or English).
+        top_n: number of document chunks to retrieve (1-20).
         doc_type: optional filter: datasheet, trm, guide, api_reference, safety,
                   release_notes, specification, docs.
     """
-    import rag_api
-    results, _ = rag_api.search(query, top_n, doc_type, 'docs')
-    return _format_results(results)
+    log.info("search_esp_docs: query=%r top_n=%d doc_type=%r", query, top_n, doc_type)
+    t0 = time.time()
+    try:
+        answer, sources = await rag_answer(
+            query, top_k=top_n, doc_type=doc_type, mode="docs")
+    except Exception:
+        log.exception("search_esp_docs failed")
+        return "检索失败，请查看 MCP 服务日志 (logs/mcp.log)"
+    log.info("search_esp_docs done: sources=%d elapsed=%.2fs",
+             len(sources), time.time() - t0)
+    return format_rag_answer(answer, sources)
 
 
 @mcp.tool()
-def search_esp_code(query: str, top_n: int = 10) -> str:
-    """Search the ESP32 source-code knowledge base (C/C++/Python examples).
+async def search_esp_code(query: str, top_n: int = 10) -> str:
+    """Answer a question from the ESP32 source-code knowledge base (C/C++/Python).
 
+    Uses the SAME RAG flow as the web chat (LLM rewrite + retrieval + answer).
     Use this for "how to implement", function/API usage, and code examples.
-    Prefer code identifiers in the query (e.g. "esp_camera_init camera_config_t").
 
     Args:
-        query: search text (Chinese or English).
-        top_n: number of results to return (1-20).
+        query: question text (Chinese or English).
+        top_n: number of code chunks to retrieve (1-20).
     """
-    import rag_api
-    results, _ = rag_api.search(query, top_n, None, 'code')
-    return _format_results(results)
+    log.info("search_esp_code: query=%r top_n=%d", query, top_n)
+    t0 = time.time()
+    try:
+        answer, sources = await rag_answer(query, top_k=top_n, mode="code")
+    except Exception:
+        log.exception("search_esp_code failed")
+        return "检索失败，请查看 MCP 服务日志 (logs/mcp.log)"
+    log.info("search_esp_code done: sources=%d elapsed=%.2fs",
+             len(sources), time.time() - t0)
+    return format_rag_answer(answer, sources)
 
 
 @mcp.tool()
-def search_esp(query: str, top_n: int = 10) -> str:
-    """Search BOTH the documentation and source-code knowledge bases (merged).
+async def search_esp(query: str, top_n: int = 10) -> str:
+    """Answer a question from BOTH the documentation and source-code bases.
 
-    Use this when the question spans docs and code (e.g. "how to configure X"
-    which needs both the explanation and the code).
+    Uses the SAME RAG flow as the web chat (LLM rewrite + retrieval + answer).
+    Use this when the question spans docs and code.
 
     Args:
-        query: search text (Chinese or English).
-        top_n: number of results to return (1-20).
+        query: question text (Chinese or English).
+        top_n: number of chunks to retrieve per base (1-20).
     """
-    import rag_api
-    results, _ = rag_api.search(query, top_n, None, 'auto')
-    return _format_results(results)
+    log.info("search_esp: query=%r top_n=%d", query, top_n)
+    t0 = time.time()
+    try:
+        answer, sources = await rag_answer(query, top_k=top_n, mode="auto")
+    except Exception:
+        log.exception("search_esp failed")
+        return "检索失败，请查看 MCP 服务日志 (logs/mcp.log)"
+    log.info("search_esp done: sources=%d elapsed=%.2fs",
+             len(sources), time.time() - t0)
+    return format_rag_answer(answer, sources)
 
 
 def main():
@@ -136,6 +212,12 @@ def main():
     parser.add_argument("--port", type=int, default=8001,
                         help="port for sse transport")
     args = parser.parse_args()
+
+    log.info("MCP server starting: transport=%s host=%s port=%d",
+             args.transport, args.host, args.port)
+    log.info("SKILL_DIR=%s", SKILL_DIR)
+    log.info("RAG_CHROMA_DIR=%s", os.environ.get('RAG_CHROMA_DIR'))
+    log.info("RAG_CODE_CHROMA_DIR=%s", os.environ.get('RAG_CODE_CHROMA_DIR'))
 
     if args.transport == "sse":
         mcp.settings.host = args.host

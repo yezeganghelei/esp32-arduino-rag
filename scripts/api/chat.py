@@ -22,6 +22,16 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# uvicorn only configures its own loggers, so this module's INFO logs would be
+# silently dropped (propagating to an unconfigured root logger). Add a stderr
+# handler so the retrieval stage timings are visible in `docker logs`.
+if not logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logger.addHandler(_h)
+    logger.setLevel(logging.DEBUG if os.environ.get("RAG_CHAT_DEBUG") == "1" else logging.INFO)
+    logger.propagate = False
+
 # ── System prompt ───────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """你是一位专业的 ESP32 技术支持工程师，基于乐鑫官方文档和代码回答用户问题。
@@ -161,8 +171,11 @@ class RAGChat:
         event-loop thread and does not block other requests.
         """
         import rag_api
+        t0 = time.time()
         raw_results, _kind = rag_api.run_query(route, self.top_k, doc_type,
                                                forced_mode=self.forced_mode)
+        logger.info("retrieve: %.2fs | kind=%s results=%d",
+                    time.time() - t0, _kind, len(raw_results))
         return self._to_sources(raw_results)
 
     async def _retrieve(self, route: dict, doc_type: Optional[str] = None) -> List[SourceDoc]:
@@ -177,6 +190,7 @@ class RAGChat:
         Falls back to the raw query when the LLM is missing or fails.
         """
         from scripts.api.llm import rewrite_queries
+        t0 = time.time()
         try:
             route = await rewrite_queries(query)
         except Exception as e:
@@ -188,27 +202,39 @@ class RAGChat:
             route["docs_query"] = query
         if not route.get("code_query"):
             route["code_query"] = query
+        logger.info("rewrite: %.2fs | needs_decompose=%s entities=%s docs_query=%r",
+                    time.time() - t0, route.get("needs_decompose"),
+                    route.get("entities"), route.get("docs_query"))
         return route
 
     async def _judge_and_decompose(self, query: str, context: str) -> dict:
         """LLM-judge whether `context` suffices to answer `query`; if not,
         return decomposed sub-queries (the "dig deeper" step)."""
         from scripts.api.llm import judge_and_decompose
+        t0 = time.time()
         try:
-            return await judge_and_decompose(query, context)
+            result = await judge_and_decompose(query, context)
         except Exception as e:
             logger.warning(f"judge_and_decompose failed: {e}")
-            return {"sufficient": True}
+            result = {"sufficient": True}
+        logger.info("judge: %.2fs | sufficient=%s sub_queries=%d",
+                    time.time() - t0, result.get("sufficient"),
+                    len(result.get("sub_queries", [])))
+        return result
 
     async def _multi_search(self, sub_queries: List[str]) -> List[SourceDoc]:
         """Search docs + code for each sub-query (respecting forced_mode)."""
         import rag_api
         mode = self.forced_mode or "auto"
+        logger.info("multi_search: %d sub-queries, mode=%s", len(sub_queries), mode)
+        t0 = time.time()
         try:
             raw = await asyncio.to_thread(rag_api.multi_search, sub_queries, 10, None, mode)
         except Exception as e:
             logger.warning(f"multi_search failed: {e}")
             return []
+        logger.info("multi_search: %.2fs | %d results",
+                    time.time() - t0, len(raw))
         return self._to_sources(raw)
 
     @staticmethod
@@ -238,6 +264,7 @@ class RAGChat:
         Mirrors the skill's "exhaust recall / re-search with different keywords"
         behaviour, but driven automatically by the LLM.
         """
+        t0 = time.time()
         sources = await self._retrieve(route, doc_type)
 
         if route.get("needs_decompose"):
@@ -248,8 +275,8 @@ class RAGChat:
                 sources = self._merge_sources(sources, extra)
 
         n_code = sum(1 for s in sources if s.doc_type == "code")
-        logger.info("retrieved %d sources (%d docs / %d code) for query: %s",
-                    len(sources), len(sources) - n_code, n_code, query)
+        logger.info("gather_sources: %.2fs total | %d sources (%d docs / %d code) | query: %s",
+                    time.time() - t0, len(sources), len(sources) - n_code, n_code, query)
         return sources
 
     @staticmethod
@@ -433,3 +460,39 @@ class RAGChat:
         except Exception as e:
             logger.exception("Chat stream error")
             yield {"type": "error", "content": str(e)}
+
+
+# ── Shared one-shot RAG answer (web / MCP / CLI use the SAME flow) ──
+
+def format_rag_answer(answer: str, sources: List[SourceDoc]) -> str:
+    """Format an answer plus its source list into readable text (MCP / CLI)."""
+    parts = [answer]
+    if sources:
+        parts.append("\n---\n\n参考来源：")
+        seen = set()
+        idx = 1
+        for s in sources:
+            key = (s.doc_title, s.doc_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            parts.append(f"{idx}. {s.doc_title} ({s.doc_type})")
+            idx += 1
+    return "\n".join(parts)
+
+
+async def rag_answer(query: str, top_k: int = 8,
+                     doc_type: Optional[str] = None,
+                     mode: str = "auto") -> Tuple[str, List[SourceDoc]]:
+    """One-shot RAG answer: rewrite -> retrieve (docs+code) -> generate.
+
+    This is the single shared flow used by the web chat, the MCP server and the
+    CLI, so all three produce identical answers for the same query.
+
+    mode: "auto" (docs+code) | "docs" | "code".
+    Returns (answer_text, sources).
+    """
+    forced = None if mode == "auto" else mode
+    chat = RAGChat(top_k=top_k, forced_mode=forced)
+    answer, sources, _ = await chat.ask(query, doc_type=doc_type, use_history=False)
+    return answer, sources
