@@ -10,7 +10,7 @@
 
 1. **Clone and install dependencies**
    ```bash
-   git clone <your-repo-url> esp-rag
+   git clone https://github.com/yezeganghelei/esp32-arduino-rag.git esp-rag
    cd esp-rag
    python -m venv .venv
    # Windows: .\.venv\Scripts\Activate.ps1
