@@ -53,7 +53,67 @@
    docker compose up -d --build
    ```
 
+> **Fast path**: steps 2, 3 and 5 can be replaced by `.\setup.ps1` (Windows) or
+> `./setup.sh` (Linux/macOS) — see *Prebuilt Data Setup* below — then run
+> `docker compose up -d`.
+
 > The `source/` and `source_code/` documents are Espressif materials and are **not** included; obtain them from Espressif and comply with their licenses.
+
+## Prebuilt Data Setup (recommended)
+
+Building the index can take hours (the source-code corpus is very large), and
+the models are not in Git. The helper scripts below download the models and
+the **prebuilt vector databases** from the `data-v1` GitHub Release, so you can
+start the service in minutes.
+
+Windows (PowerShell):
+```powershell
+.\setup.ps1                 # models + documentation DB
+.\setup.ps1 --db all        # + source-code DB
+```
+
+Linux / macOS:
+```bash
+./setup.sh                  # models + documentation DB
+./setup.sh --db all         # + source-code DB
+```
+
+Then start the service:
+```bash
+docker compose up -d        # Web UI :7860, API :8000, MCP :8001
+```
+
+The helper:
+- downloads the models configured in `config.yaml` into `models/`;
+- downloads and extracts `.chroma_esp32_all/` (and optionally `.chroma_esp32_code/`);
+- creates `.env` from `.env.example` if missing (set `LLM_API_KEY` for chat).
+
+Options: `--db none` (models only), `--mirror` (HuggingFace mirror), `--force`
+(overwrite existing DBs), `--model <name>`. The prebuilt DBs use the default
+embedding model (`bge-base-en-v1.5`); if you switch models, rebuild (§6).
+
+If no prebuilt release is available, or you use a custom corpus, build locally
+after placing documents in `source/` (see §6):
+```bash
+python -m scripts.build.run
+```
+
+### Maintaining the data release (maintainer)
+
+`scripts/package_data.py` creates split archives (each part < 2 GB, the GitHub
+Release asset limit) plus a manifest, then you upload them to a Release tagged
+`data-v1`:
+
+```bash
+python scripts/package_data.py --kind docs       # ~0.8 GB (documentation DB)
+python scripts/package_data.py --kind code       # ~5.5 GB (split into parts)
+# or both:
+python scripts/package_data.py --kind all --version data-v1
+```
+
+Upload every file under `dist/docs/` and `dist/code/` (the `*-manifest.json`
+and all `.partNN` files) to that Release. `scripts/setup_data.py` reads the
+manifests, verifies SHA-256, reassembles the parts and extracts them.
 
 ## 1. Overview
 
