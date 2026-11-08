@@ -22,11 +22,13 @@ Environment:
 
 import gc
 import hashlib
+import logging
 import math
 import os
 import pickle
 import re
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -35,6 +37,24 @@ from typing import Dict, List, Optional, Set, Tuple
 import numpy as np
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from tqdm import tqdm
+
+# ── Logging ───────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logger.addHandler(_h)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+# ── Search serialization ──────────────────────────────────────────────────
+# ChromaDB/hnswlib and the shared embedding model / cross-encoder are NOT
+# thread-safe under concurrent access. The web server runs a single uvicorn
+# worker but offloads each search to a thread (asyncio.to_thread), so concurrent
+# requests can query the same HNSW index at once and intermittently fail (empty
+# results). Serialize all searches with one global lock.
+_SEARCH_LOCK = threading.RLock()
 
 # ── BM25 sparse retrieval ────────────────────────────────────────────────
 try:
@@ -2110,6 +2130,19 @@ class ChromaIndex:
                where: Optional[dict] = None,
                doc_type: Optional[str] = None,
                hybrid: bool = True, rerank: bool = True) -> List[dict]:
+        """Thread-safe search wrapper.
+
+        Serializes access to the shared ChromaDB/hnswlib index, embedding model
+        and cross-encoder, which are not thread-safe under concurrent queries.
+        """
+        with _SEARCH_LOCK:
+            return self._search_impl(query, n_results, where, doc_type,
+                                     hybrid, rerank)
+
+    def _search_impl(self, query: str, n_results: int = 10,
+                     where: Optional[dict] = None,
+                     doc_type: Optional[str] = None,
+                     hybrid: bool = True, rerank: bool = True) -> List[dict]:
         """Search the index and return top-n results.
 
         If doc_type is specified, searches only that doc type's collection.
@@ -2149,7 +2182,9 @@ class ChromaIndex:
                         r['_rank'] = len(all_results)
                         r['_collection'] = dtype
                     all_results.extend(formatted)
-                except Exception:
+                except Exception as e:
+                    logger.warning("dense query failed for collection %r: %s",
+                                   dtype, e)
                     continue
 
             if not all_results:
@@ -2328,8 +2363,9 @@ class ChromaIndex:
                         candidate_list.sort(key=lambda x: -x.get('_blend', 0.0))
                     else:
                         candidate_list.sort(key=lambda x: -x.get('ce_score', 0))
-                except Exception:
-                    pass  # fall back to current ordering
+                except Exception as e:
+                    logger.warning("cross-encoder rerank failed, keeping fused "
+                                   "order: %s", e)
 
         return candidate_list[:n_results]
 
