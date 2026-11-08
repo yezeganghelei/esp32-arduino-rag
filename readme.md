@@ -27,7 +27,9 @@
    ```
    Models are stored under `models/dense/<name>/` and `models/cross-encoder/<name>/`. `embeddinggemma-300m-npu` uses the Nexa NPU format and must be fetched manually.
 
-3. **Provide the document corpus** — put your ESP32 documentation under `source/`, or point `RAG_DOCS_DIR` at any directory (see §6.4).
+3. **Provide the corpora** — there are two independent corpora:
+   - **Documentation** → put your ESP32 docs under `source/`, or point `RAG_DOCS_DIR` at any directory (see §6.4).
+   - **Source code** (optional, for code search) → put the code under `source_code/`, or set `code.docs_dir` in `config.yaml` (see §6.5).
 
 4. **Configure the LLM key** (only needed for chat / answer generation):
    ```bash
@@ -36,7 +38,10 @@
 
 5. **Build the index, then query**
    ```bash
-   python -m scripts.build.run              # first build; incremental on re-run
+   python -m scripts.build.run              # documentation DB -> .chroma_esp32_all/
+   # optional: build the source-code DB -> .chroma_esp32_code/
+   #   Windows PowerShell: $env:RAG_INDEX_CODE="1"; python -m scripts.build.run
+   #   Linux/macOS:        RAG_INDEX_CODE=1 python -m scripts.build.run
    python scripts/agent.py "ESP32-S3 boot process" --top 5
    ```
 
