@@ -35,8 +35,11 @@ logs/
 
 # ── 大型数据（不入库，运行时下载/构建，或用 Release 附件分发）────
 models/
-source/
-source_code/
+# Ignore corpus contents, but keep the per-directory readme.md (points to the download repo)
+source/*
+!source/readme.md
+source_code/*
+!source_code/readme.md
 .chroma_*/
 !/.gitkeep
 
