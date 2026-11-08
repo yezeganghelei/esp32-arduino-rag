@@ -1,2 +1,56 @@
-# Eval 报告（运行产物，不入库）
+# ── 密钥 / 环境配置 ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.*
+
+# ── Python ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+/build/
+/dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ── 运行日志 / 构建产物 ──────────────────────────────────────────
+logs/
+*.log
+*.err
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# ── 大型数据（不入库，运行时下载/构建，或用 Release 附件分发）────
+models/
+source/
+source_code/
+.chroma_*/
+!/.gitkeep
+
+# ── Eval 运行报告 ────────────────────────────────────────────────
 eval/reports/
+
+# ── 模型 / 下载缓存 ──────────────────────────────────────────────
+.cache/
+*.vhdx
+.cross-encoder-cache/
+
+# ── 编辑器 / 操作系统 ────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
