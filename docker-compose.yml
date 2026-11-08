@@ -1,14 +1,16 @@
 # ── ESP32 RAG docker-compose.yml ───────────────────────────────────
 #
-# Quick start:
+# Quick start (uses the published GHCR image — no local build):
 #   1. Copy .env.example to .env and fill in LLM_API_KEY
-#   2. docker-compose up -d --build
-#   3. Web chat UI:  http://localhost:7860
+#   2. Download data (models + prebuilt DB): ./setup.sh  (or .\setup.ps1)
+#   3. docker compose up -d          # pulls ghcr.io/... if not present
+#      Web chat UI:  http://localhost:7860
 #      API docs:     http://localhost:8000/docs
 #      MCP (SSE):    http://localhost:8001/sse
 #
-# Rebuild after code changes:
-#   docker-compose up -d --build
+# Build the image locally from source (maintainers / local code changes):
+#   docker build -t ghcr.io/yezeganghelei/esp32-arduino-rag:latest .
+#   docker compose up -d
 #
 # Run one-off commands:
 #   docker-compose run --rm esp-rag "ESP32-S3 boot process" --top 5
@@ -19,8 +21,10 @@
 
 services:
   esp-rag:
-    build: .
-    image: esp-rag:latest
+    # Published image. `docker compose up` pulls it if it is not present locally.
+    # To build from source instead, run:
+    #   docker build -t ghcr.io/yezeganghelei/esp32-arduino-rag:latest .
+    image: ghcr.io/yezeganghelei/esp32-arduino-rag:latest
     container_name: esp-rag
     restart: unless-stopped
     ports:

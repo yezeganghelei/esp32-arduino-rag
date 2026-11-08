@@ -49,8 +49,8 @@
    ```bash
    uvicorn scripts.api.server:app --port 8000   # FastAPI
    python -m scripts.web.app                    # Gradio UI on :7860
-   # or with Docker (see §10):
-   docker compose up -d --build
+   # or with Docker (pulls the published image; see §10):
+   docker compose up -d
    ```
 
 > **Fast path**: steps 2, 3 and 5 can be replaced by `.\setup.ps1` (Windows) or
@@ -740,8 +740,18 @@ The image contains **code + Python dependencies only** (Scheme A): models, docum
 
 ### 10.2 Start the stack
 
+`docker compose` uses the published GHCR image and pulls it if it is not
+present locally:
+
 ```bash
-docker compose up -d --build
+docker compose pull         # optional: force the latest image
+docker compose up -d
+```
+
+To build the image from source instead (maintainers / local code changes):
+```bash
+docker build -t ghcr.io/yezeganghelei/esp32-arduino-rag:latest .
+docker compose up -d
 ```
 
 | URL | Service |
@@ -757,7 +767,7 @@ The vector DBs are mounted read-write, so the first run can build/update them. S
 ```bash
 docker compose logs -f                                            # follow logs
 docker compose down                                               # stop the stack
-docker compose up -d --build                                      # rebuild after code changes
+docker compose pull && docker compose up -d                       # update to latest image
 docker compose run --rm esp-rag "ESP32-S3 boot process" --top 5   # one-off query
 docker compose run --rm esp-rag build                             # (re)build the index
 ```
@@ -765,7 +775,7 @@ docker compose run --rm esp-rag build                             # (re)build th
 ### 10.4 Without Compose (plain docker)
 
 ```bash
-docker build -t esp-rag:latest .
+docker pull ghcr.io/yezeganghelei/esp32-arduino-rag:latest
 
 docker run --rm -p 8000:8000 -p 7860:7860 -p 8001:8001 \
   --env-file .env \
@@ -773,7 +783,12 @@ docker run --rm -p 8000:8000 -p 7860:7860 -p 8001:8001 \
   -v "$PWD/source:/app/source:ro" \
   -v "$PWD/.chroma_esp32_all:/app/.chroma_esp32_all" \
   -v "$PWD/config.yaml:/app/config.yaml:ro" \
-  esp-rag:latest all
+  ghcr.io/yezeganghelei/esp32-arduino-rag:latest all
+```
+
+To build locally instead:
+```bash
+docker build -t ghcr.io/yezeganghelei/esp32-arduino-rag:latest .
 ```
 
 Entrypoint modes: `server` (API only), `web` (UI only), `mcp` (MCP only), `all` (all three), `build` (index build); any other string is passed to `agent.py` as a query.
