@@ -31,7 +31,8 @@ __pycache__/
 Thumbs.db
 desktop.ini
 
-# Build logs
+# Build / runtime logs (root and logs/)
+logs/
 *.log
 *.err
 
@@ -54,9 +55,6 @@ source_code/
 # Skill / project docs that are not needed at runtime
 readme.md
 SKILL.md
-ESP-RAG-实施方案.md
-output_resolution.md
-docs_build.log
-docs_build.err
-code_build.log
-code_build.err
+
+# Internal design/discussion notes (local only)
+notes/
