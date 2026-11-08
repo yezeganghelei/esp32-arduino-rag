@@ -48,6 +48,7 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r re
 
 # ── App code ───────────────────────────────────────────────────────
 COPY scripts/ ./scripts/
+COPY eval/ ./eval/
 COPY config.yaml .
 
 # ── Runtime environment ────────────────────────────────────────────

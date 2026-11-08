@@ -48,6 +48,9 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
+# Silence chromadb's noisy telemetry errors (posthog API mismatch in 0.4.24).
+logging.getLogger('chromadb.telemetry.product.posthog').setLevel(logging.CRITICAL)
+
 # ── Search serialization ──────────────────────────────────────────────────
 # ChromaDB/hnswlib and the shared embedding model / cross-encoder are NOT
 # thread-safe under concurrent access. The web server runs a single uvicorn
