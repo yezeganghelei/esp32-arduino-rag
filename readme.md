@@ -18,12 +18,14 @@
    pip install -r requirements.txt
    ```
 
-2. **Download the models** (not committed to Git). The two below are enough to run:
+2. **Download the models** (not committed to Git). This fetches the models configured in `config.yaml`:
    ```bash
-   huggingface-cli download BAAI/bge-base-en-v1.5 --local-dir models/dense/bge-base-en-v1.5
-   huggingface-cli download cross-encoder/ms-marco-MiniLM-L-6-v2 --local-dir models/cross-encoder/cross-encoder-ms-marco-MiniLM-L-6-v2
+   python -m scripts.download_models            # defaults (enough to run)
+   python -m scripts.download_models --all      # all supported models
+   python -m scripts.download_models --list     # show status, download nothing
+   python -m scripts.download_models --mirror   # use https://hf-mirror.com (China)
    ```
-   Optional alternatives (place under `models/dense/<name>`): `sentence-transformers/all-MiniLM-L6-v2`, `Alibaba-NLP/gte-base-en-v1.5`.
+   Models are stored under `models/dense/<name>/` and `models/cross-encoder/<name>/`. `embeddinggemma-300m-npu` uses the Nexa NPU format and must be fetched manually.
 
 3. **Provide the document corpus** — put your ESP32 documentation under `source/`, or point `RAG_DOCS_DIR` at any directory (see §6.4).
 
@@ -64,6 +66,7 @@ Skill directory structure:
 ├── scripts/
 │   ├── main.py                                    # ChromaDB RAG engine (core implementation)
 │   ├── agent.py                                    # One-shot query entry point (single Bash call, avoids repeated permission prompts)
+│   ├── download_models.py                          # Download models from HuggingFace (run once)
 │   ├── __init__.py
 │   └── build/
 │       ├── run.py                                 # Index build entry script (supports the --model parameter)
@@ -663,6 +666,7 @@ The image contains **code + Python dependencies only** (Scheme A): models, docum
 - Prepare the same host directories as in Quick Start — `models/`, `source/` (and optionally `source_code/`), plus the vector DB dirs:
   ```bash
   mkdir -p models source .chroma_esp32_all .chroma_esp32_code
+  python -m scripts.download_models            # populate models/ on the host
   ```
 - `docker compose` reads `.env` automatically; copy and edit it:
   ```bash
