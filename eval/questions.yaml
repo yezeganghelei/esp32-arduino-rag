@@ -1,0 +1,400 @@
+# ═══════════════════════════════════════════════════════════════════════
+# ESP32 RAG 评测题库（模板）
+# ═══════════════════════════════════════════════════════════════════════
+# 用途：对比「裸大模型」vs「本项目 RAG」在“硬事实”问题上的准确率/可引用性。
+#
+# 字段：
+#   id         唯一标识
+#   category   分类（pin_count / cpu / memory / wireless / peripheral /
+#              variant / boot / register / errata）
+#   question   用户问题
+#   expected   标准答案（裁判用它判断对错；请务必对照你的语料核对/完善）
+#   keywords   关键词匹配用（做裁判失败时的兜底；取值应为答案中必须出现的核心 token）
+#   source_hint 期望命中的文档/来源（用于人工核对）
+#   verify     可选 true = 该条建议你对照语料再确认一次
+#
+# 说明：expected 是“事实基准”，不是强制唯一表述。裁判只看事实是否一致。
+# 建议你按自己的语料补充/修正，并持续增加“变体差异 / errata / 寄存器”类问题。
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── 引脚/GPIO 数量 ──────────────────────────────────────────────────
+- id: gpio_s3
+  category: pin_count
+  question: ESP32-S3 一共有多少个 GPIO 引脚？
+  expected: "45 个 GPIO"
+  keywords: ["45"]
+  source_hint: esp32-s3_datasheet / esp32-s3 TRM
+
+- id: gpio_esp32
+  category: pin_count
+  question: 经典 ESP32 一共有多少个 GPIO 引脚？
+  expected: "34 个 GPIO"
+  keywords: ["34"]
+  source_hint: esp32 datasheet
+  verify: true
+
+- id: gpio_c3
+  category: pin_count
+  question: ESP32-C3 一共有多少个 GPIO 引脚？
+  expected: "22 个 GPIO"
+  keywords: ["22"]
+  source_hint: esp32-c3 datasheet
+  verify: true
+
+# ── CPU ────────────────────────────────────────────────────────────
+- id: cpu_s3
+  category: cpu
+  question: ESP32-S3 使用什么 CPU 内核，最高主频是多少？
+  expected: "Xtensa LX7 双核，最高 240 MHz"
+  keywords: ["LX7", "240"]
+  source_hint: esp32-s3 datasheet
+
+- id: cpu_esp32
+  category: cpu
+  question: 经典 ESP32 使用什么 CPU 内核，最高主频是多少？
+  expected: "Xtensa LX6 双核，最高 240 MHz"
+  keywords: ["LX6", "240"]
+  source_hint: esp32 datasheet
+
+- id: cpu_riscv
+  category: cpu
+  question: ESP32-C3 使用的是哪种指令集架构的 CPU？
+  expected: "RISC-V 单核"
+  keywords: ["RISC-V"]
+  source_hint: esp32-c3 datasheet
+
+# ── 内存 ───────────────────────────────────────────────────────────
+- id: sram_s3
+  category: memory
+  question: ESP32-S3 的片上 SRAM 容量是多少？
+  expected: "512 KB"
+  keywords: ["512"]
+  source_hint: esp32-s3 datasheet
+
+- id: sram_esp32
+  category: memory
+  question: 经典 ESP32 的片上 SRAM 容量是多少？
+  expected: "520 KB"
+  keywords: ["520"]
+  source_hint: esp32 datasheet
+
+- id: rom_s3
+  category: memory
+  question: ESP32-S3 的片上 ROM 容量是多少？
+  expected: "384 KB"
+  keywords: ["384"]
+  source_hint: esp32-s3 datasheet
+
+# ── 无线 ───────────────────────────────────────────────────────────
+- id: bt_s3
+  category: wireless
+  question: ESP32-S3 支持经典蓝牙（Bluetooth Classic / BR-EDR）吗？
+  expected: "不支持；仅支持 Bluetooth LE（BLE 5）"
+  keywords: ["不支持", "BLE"]
+  source_hint: esp32-s3 datasheet
+
+- id: bt_esp32
+  category: wireless
+  question: 经典 ESP32 支持哪些蓝牙类型？
+  expected: "经典蓝牙（BR/EDR）和 Bluetooth LE（BLE）"
+  keywords: ["经典蓝牙", "BLE"]
+  source_hint: esp32 datasheet
+
+- id: wifi_c6
+  category: wireless
+  question: ESP32-C6 支持哪一代 Wi-Fi 标准？
+  expected: "Wi-Fi 6（802.11ax）"
+  keywords: ["Wi-Fi 6"]
+  source_hint: esp32-c6 datasheet
+  verify: true
+
+- id: wifi_esp32
+  category: wireless
+  question: 经典 ESP32 支持哪种 Wi-Fi 标准，工作在哪个频段？
+  expected: "IEEE 802.11 b/g/n，2.4 GHz"
+  keywords: ["802.11", "2.4"]
+  source_hint: esp32 datasheet
+
+# ── 外设 ───────────────────────────────────────────────────────────
+- id: usb_s3
+  category: peripheral
+  question: ESP32-S3 是否带有 USB OTG 和 USB Serial/JTAG？
+  expected: "带有 USB OTG 和 USB Serial/JTAG"
+  keywords: ["USB OTG", "Serial"]
+  source_hint: esp32-s3 datasheet
+
+- id: uart_esp32
+  category: peripheral
+  question: 经典 ESP32 有几个 UART 控制器？
+  expected: "3 个"
+  keywords: ["3"]
+  source_hint: esp32 datasheet / TRM
+  verify: true
+
+- id: ledc_s3
+  category: peripheral
+  question: ESP32-S3 的 LEDC（PWM）有多少个通道？
+  expected: "8 个"
+  keywords: ["8"]
+  source_hint: esp32-s3 datasheet / TRM
+  verify: true
+
+# ── 启动 / 变体差异 ─────────────────────────────────────────────────
+- id: boot_s3
+  category: boot
+  question: ESP32-S3 有哪几种启动模式？
+  expected: "SPI Boot、Joint Download Boot、SPI Download Boot"
+  keywords: ["SPI Boot", "Download Boot"]
+  source_hint: esp32-s3 datasheet / TRM 芯片启动控制
+
+- id: variant_bt
+  category: variant
+  question: ESP32 与 ESP32-S3 在蓝牙支持上的主要区别是什么？
+  expected: "经典 ESP32 支持经典蓝牙+BLE；ESP32-S3 仅支持 BLE（不支持经典蓝牙）"
+  keywords: ["经典蓝牙", "BLE"]
+  source_hint: esp32 datasheet vs esp32-s3 datasheet
+
+# ═══════════════════════════════════════════════════════════════════════
+# 硬题（baseline 更容易错、RAG 有据可查）：寄存器地址 / 引脚陷阱 /
+# 变体差异 / 外设细节。标 verify:true 的请对照你的语料再核对一次。
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── 寄存器地址 ─────────────────────────────────────────────────────
+- id: reg_status_w1ts
+  category: register
+  question: ESP32-S3 的 GPIO_STATUS_W1TS_REG（GPIO0~31 中断状态置位）寄存器地址是多少？
+  expected: "0x0048"
+  keywords: ["0048"]
+  source_hint: esp32-s3 TRM GPIO 寄存器
+  verify: true
+
+- id: reg_status1_w1tc
+  category: register
+  question: ESP32-S3 的 GPIO_STATUS1_W1TC_REG（GPIO32~48 中断状态清除）寄存器地址是多少？
+  expected: "0x0058"
+  keywords: ["0058"]
+  source_hint: esp32-s3 TRM GPIO 寄存器
+  verify: true
+
+- id: reg_gpio_in
+  category: register
+  question: ESP32-S3 的 GPIO_IN_REG（GPIO0~31 输入值）寄存器地址是多少？
+  expected: "0x003C"
+  keywords: ["003c"]
+  source_hint: esp32-s3 TRM GPIO 寄存器
+  verify: true
+
+# ── 引脚陷阱 ───────────────────────────────────────────────────────
+- id: gpio_gap_s3
+  category: pin_count
+  question: ESP32-S3 的 GPIO 编号中，哪些编号是不存在（被跳过）的？
+  expected: "GPIO22、GPIO23、GPIO24、GPIO25"
+  keywords: ["22", "25"]
+  source_hint: esp32-s3 TRM IO MUX / GPIO Matrix
+
+- id: gpio_input_only_esp32
+  category: pin_count
+  question: 经典 ESP32 中，哪些 GPIO 只能作为输入、不能输出？
+  expected: "GPIO34 ~ GPIO39（仅输入）"
+  keywords: ["34", "39"]
+  source_hint: esp32 datasheet / TRM
+  verify: true
+
+- id: strapping_s3
+  category: boot
+  question: ESP32-S3 有哪些 strapping（启动配置）引脚？
+  expected: "GPIO0、GPIO3、GPIO45、GPIO46"
+  keywords: ["GPIO0", "GPIO45", "GPIO46"]
+  source_hint: esp32-s3 datasheet Strapping Pins
+  verify: true
+
+# ── 变体差异 ───────────────────────────────────────────────────────
+- id: bt_s2
+  category: variant
+  question: ESP32-S2 支持蓝牙吗？
+  expected: "不支持蓝牙（仅支持 Wi-Fi）"
+  keywords: ["不支持"]
+  source_hint: esp32-s2 datasheet
+  verify: true
+
+- id: core_variant
+  category: variant
+  question: ESP32 与 ESP32-S3 的 CPU 内核区别是什么？
+  expected: "ESP32 为 Xtensa LX6 双核；ESP32-S3 为 Xtensa LX7 双核"
+  keywords: ["LX6", "LX7"]
+  source_hint: esp32 datasheet vs esp32-s3 datasheet
+
+- id: isa_variant
+  category: variant
+  question: 在 ESP32、ESP32-S3、ESP32-C3 三者中，哪一款是 RISC-V 架构？
+  expected: "ESP32-C3（RISC-V 单核）"
+  keywords: ["C3", "RISC-V"]
+  source_hint: datasheets
+
+# ── 外设细节 ───────────────────────────────────────────────────────
+- id: wifi_band_s3
+  category: wireless
+  question: ESP32-S3 的 Wi-Fi 工作频段和标准是什么？
+  expected: "2.4 GHz，IEEE 802.11 b/g/n"
+  keywords: ["2.4", "802.11"]
+  source_hint: esp32-s3 datasheet
+
+- id: adc_s3
+  category: peripheral
+  question: ESP32-S3 有几个 SAR ADC 控制器？
+  expected: "2 个（SAR ADC1、SAR ADC2）"
+  keywords: ["2"]
+  source_hint: esp32-s3 datasheet / TRM
+  verify: true
+
+- id: usb_mode_s3
+  category: peripheral
+  question: ESP32-S3 的 USB OTG 支持什么速率？
+  expected: "全速 USB（Full-Speed，12 Mbps）USB 2.0 OTG"
+  keywords: ["全速", "Full-Speed", "12"]
+  source_hint: esp32-s3 datasheet
+  verify: true
+
+- id: flash_psram_s3
+  category: memory
+  question: ESP32-S3 支持哪两种 SPI 模式的片外 Flash/PSRAM？
+  expected: "Quad SPI（4 线）和 Octal SPI（8 线）"
+  keywords: ["Quad", "Octal"]
+  source_hint: esp32-s3 datasheet
+  verify: true
+
+- id: ulp_s3
+  category: cpu
+  question: ESP32-S3 的 ULP 协处理器有哪两种？
+  expected: "ULP-RISC-V 和 ULP-FSM"
+  keywords: ["RISC-V", "FSM"]
+  source_hint: esp32-s3 TRM ULP
+  verify: true
+
+# ═══════════════════════════════════════════════════════════════════════
+# 硬题 2：语料实取 —— 芯片勘误(errata) + datasheet 细节
+# 来源：esp-chip-errata-en-master-esp32s3.pdf（ESP32-S3 Series SoC Errata v1.3）
+#       与 esp32-s3_datasheet_en.pdf。这些是大模型大概率答不准的点。
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── 勘误：文档版本 / 条目 ──────────────────────────────────────────
+- id: errata_version
+  category: errata
+  question: ESP32-S3 系列 SoC 勘误文档（ESP32-S3 Series SoC Errata）当前版本号是多少？
+  expected: "v1.3（2025-03-31）"
+  keywords: ["v1.3"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf
+  verify: true
+
+- id: errata_count
+  category: errata
+  question: ESP32-S3 SoC Errata v1.3 的勘误汇总表一共列出多少条 errata？
+  expected: "8 条"
+  keywords: ["8"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 汇总表
+  verify: true
+
+- id: errata_cache126
+  category: errata
+  question: ESP32-S3 的 [CACHE-126] 描述的是什么问题？
+  expected: "Cache Hit Error During Cache Write-Backs（缓存回写过程中的缓存命中错误）"
+  keywords: ["Cache", "Write-Back"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.1
+  verify: true
+
+- id: errata_rtc126
+  category: errata
+  question: ESP32-S3 的 [RTC-126] 描述的是什么问题？
+  expected: "从 light-sleep 唤醒后读取 RTC 寄存器出错"
+  keywords: ["light-sleep", "RTC"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.2
+  verify: true
+
+- id: errata_analog160
+  category: errata
+  question: ESP32-S3 的 [ANALOG-160] 在什么条件下会损坏芯片？
+  expected: "当 BIAS_SLEEP = 0 且 PD_CUR = 1 时芯片会被损坏"
+  keywords: ["BIAS_SLEEP", "PD_CUR"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.3
+  verify: true
+
+- id: errata_lcd239
+  category: errata
+  question: ESP32-S3 的 [LCD-239] 描述的是什么问题？
+  expected: "使用某些时钟分频时，LCD 模块行为不可靠"
+  keywords: ["LCD", "时钟分频"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.4
+  verify: true
+
+- id: errata_usbotg4289
+  category: errata
+  question: ESP32-S3 的 [USBOTG-4289] 描述的是什么问题？
+  expected: "USB-OTG 下载功能不可用（The USB-OTG Download Function Is Unavailable）"
+  keywords: ["USB-OTG", "Download"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.5
+  verify: true
+
+- id: errata_rmt176
+  category: errata
+  question: ESP32-S3 的 [RMT-176] 描述的是什么问题？
+  expected: "RMT 连续发送模式下空闲状态信号电平可能出错"
+  keywords: ["RMT", "Idle"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.6
+  verify: true
+
+- id: errata_touch100_wa
+  category: errata
+  question: ESP32-S3 的 [TOUCH-100] 建议的规避（workaround）方法是什么？
+  expected: "跳过前两次 TOUCH_SCAN_DONE_INT 中断，然后关闭并停止使用它们；官方无修复计划"
+  keywords: ["TOUCH_SCAN_DONE_INT", "跳过"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.7
+  verify: true
+
+- id: errata_adc183
+  category: errata
+  question: ESP32-S3 的 [ADC-183] 描述的问题和建议的规避方法是什么？
+  expected: "SAR ADC2 的数字控制器(DMA)可能收到错误的采样使能信号而失效；建议改用 RTC 控制器控制 SAR ADC2"
+  keywords: ["ADC2", "RTC"]
+  source_hint: esp-chip-errata-en-master-esp32s3.pdf 3.8
+  verify: true
+
+# ── datasheet 细节 ─────────────────────────────────────────────────
+- id: dsheet_flash_freq
+  category: memory
+  question: ESP32-S3 片上 SPI flash 默认最高工作时钟频率是多少？是否支持 auto suspend？
+  expected: "默认最高 80 MHz，且不支持 auto suspend（如需 120 MHz 或 auto suspend 需联系乐鑫）"
+  keywords: ["80", "auto suspend"]
+  source_hint: esp32-s3 datasheet Nomenclature 注释
+  verify: true
+
+- id: dsheet_psram_ecc
+  category: memory
+  question: 对带 Octal SPI PSRAM 的 ESP32-S3（如 ESP32-S3R8），启用 PSRAM ECC 后会带来什么影响？
+  expected: "最高环境温度可提升到 85 °C，但可用 PSRAM 容量减少 1/16"
+  keywords: ["85", "1/16"]
+  source_hint: esp32-s3 datasheet Nomenclature 注释
+  verify: true
+
+- id: dsheet_pwr_pins
+  category: peripheral
+  question: ESP32-S3 有几个输入电源引脚，分别是什么？
+  expected: "6 个输入电源引脚：VDDA1、VDDA2、VDD3P3×2、VDD3P3_RTC、VDD3P3_CPU（另有 VDD_SPI 为输入/输出电源引脚）"
+  keywords: ["VDDA1", "VDD3P3_RTC", "VDD3P3_CPU"]
+  source_hint: esp32-s3 datasheet Power Scheme
+  verify: true
+
+- id: dsheet_ble_phy
+  category: wireless
+  question: ESP32-S3 的 Bluetooth LE PHY 支持哪些速率（含 Coded PHY）？
+  expected: "1 Mbps、2 Mbps，以及 Coded PHY（125 Kbps 和 500 Kbps）"
+  keywords: ["1 Mbps", "2 Mbps", "500"]
+  source_hint: esp32-s3 datasheet Bluetooth LE PHY
+  verify: true
+
+- id: dsheet_wifi_ifaces
+  category: wireless
+  question: ESP32-S3 的 Wi-Fi MAC 支持几个虚拟 Wi-Fi 接口？
+  expected: "4 个（Four virtual Wi-Fi interfaces）"
+  keywords: ["4"]
+  source_hint: esp32-s3 datasheet Wi-Fi MAC
+  verify: true
