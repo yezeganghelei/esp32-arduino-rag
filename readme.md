@@ -103,8 +103,9 @@ retrieval works without it). The corpus lives in a single repo
 ```
 
 Split rule: `01. Software Code` → `source_code/`; every other top-level
-directory → `source/`. Use `--exclude-dir NAME` to skip directories (e.g.
-`--exclude-dir "Products"`).
+directory → `source/`. By default `08. ESP32-Arduino-AI-Agent-RAG` and
+`Products` are skipped (root files such as `readme.md` are never moved); use
+`--exclude-dir NAME` to skip additional directories.
 
 If no prebuilt release is available, or you use a custom corpus, build locally
 after placing documents in `source/` (see §6):

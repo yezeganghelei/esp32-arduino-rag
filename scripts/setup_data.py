@@ -51,6 +51,11 @@ DEFAULT_CORPUS_URL = (
 #   "01. Software Code" -> source_code/
 #   every other top-level directory -> source/
 CODE_DIR_NAME = '01. Software Code'
+# Top-level corpus directories skipped by default (not relevant to retrieval).
+DEFAULT_EXCLUDE_DIRS = {
+    '08. ESP32-Arduino-AI-Agent-RAG',
+    'Products',
+}
 UA = {'User-Agent': 'esp-rag-setup/1.0'}
 
 
@@ -188,10 +193,11 @@ def _setup_corpus(url, force, exclude_dirs):
 
         os.makedirs(src_root, exist_ok=True)
         os.makedirs(code_root, exist_ok=True)
+        exclude = set(DEFAULT_EXCLUDE_DIRS) | set(exclude_dirs or ())
         moved = 0
         for name in sorted(os.listdir(root)):
             src = os.path.join(root, name)
-            if not os.path.isdir(src) or name in exclude_dirs:
+            if not os.path.isdir(src) or name in exclude:
                 continue
             dest = os.path.join(
                 code_root if name == CODE_DIR_NAME else src_root, name)
@@ -253,7 +259,9 @@ def main():
                     help='corpus zip URL (or env RAG_CORPUS_URL)')
     ap.add_argument('--exclude-dir', action='append', default=[],
                     dest='exclude_dirs', metavar='NAME',
-                    help='top-level corpus directory to skip (repeatable)')
+                    help='additional top-level corpus directory to skip '
+                         '(repeatable; 08. ESP32-Arduino-AI-Agent-RAG and '
+                         'Products are always skipped)')
     ap.add_argument('--force', action='store_true',
                     help='overwrite existing vector databases and corpus')
     args = ap.parse_args()
