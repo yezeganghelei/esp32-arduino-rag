@@ -78,15 +78,20 @@ Linux / macOS:
 ./setup.sh --db all         # + source-code DB
 ```
 
-Then start the service:
-```bash
-docker compose up -d        # Web UI :7860, API :8000, MCP :8001
-```
-
 The helper:
 - downloads the models configured in `config.yaml` into `models/`;
 - downloads and extracts `.chroma_esp32_all/` (and optionally `.chroma_esp32_code/`);
-- creates `.env` from `.env.example` if missing (set `LLM_API_KEY` for chat).
+- creates `.env` from `.env.example` if it is missing.
+
+**Set the LLM key, then start the service:**
+```bash
+# Edit .env and set LLM_API_KEY=... (required for chat; retrieval works without it)
+docker compose up -d        # Web UI :7860, API :8000, MCP :8001
+```
+
+> `LLM_API_KEY` is read when the container starts, so set it **before**
+> `docker compose up`. If you change `.env` later, apply it with
+> `docker compose up -d --force-recreate`.
 
 Options: `--db none` (models only), `--corpus` (also fetch the source corpus,
 see below), `--mirror` (HuggingFace mirror), `--force` (overwrite existing DBs),
@@ -757,12 +762,16 @@ The image contains **code + Python dependencies only** (Scheme A): models, docum
 ### 10.2 Start the stack
 
 `docker compose` uses the published GHCR image and pulls it if it is not
-present locally:
+present locally. Make sure `LLM_API_KEY` is already set in `.env` (it is read
+at container start):
 
 ```bash
 docker compose pull         # optional: force the latest image
 docker compose up -d
 ```
+
+> Changed `LLM_API_KEY` (or other env values) after starting? Apply them with
+> `docker compose up -d --force-recreate`.
 
 To build the image from source instead (maintainers / local code changes):
 ```bash
