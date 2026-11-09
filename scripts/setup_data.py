@@ -53,6 +53,7 @@ DEFAULT_CORPUS_URL = (
 CODE_DIR_NAME = '01. Software Code'
 # Top-level corpus directories skipped by default (not relevant to retrieval).
 DEFAULT_EXCLUDE_DIRS = {
+    '05. Common Tools',
     '08. ESP32-Arduino-AI-Agent-RAG',
     'Products',
 }
@@ -260,8 +261,9 @@ def main():
     ap.add_argument('--exclude-dir', action='append', default=[],
                     dest='exclude_dirs', metavar='NAME',
                     help='additional top-level corpus directory to skip '
-                         '(repeatable; 08. ESP32-Arduino-AI-Agent-RAG and '
-                         'Products are always skipped)')
+                         '(repeatable; 05. Common Tools, '
+                         '08. ESP32-Arduino-AI-Agent-RAG and Products are '
+                         'always skipped)')
     ap.add_argument('--force', action='store_true',
                     help='overwrite existing vector databases and corpus')
     args = ap.parse_args()
