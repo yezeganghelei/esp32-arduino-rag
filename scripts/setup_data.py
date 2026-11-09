@@ -31,6 +31,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import zipfile
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SKILL_DIR not in sys.path:
@@ -43,6 +44,13 @@ DB_DIRS = {
 DEFAULT_DATA_URL = (
     'https://github.com/yezeganghelei/esp32-arduino-rag/releases/download/data-v1'
 )
+DEFAULT_CORPUS_URL = (
+    'https://github.com/yezeganghelei/ESP32/archive/refs/heads/main.zip'
+)
+# The corpus repo is a single tree; this is the documented split:
+#   "01. Software Code" -> source_code/
+#   every other top-level directory -> source/
+CODE_DIR_NAME = '01. Software Code'
 UA = {'User-Agent': 'esp-rag-setup/1.0'}
 
 
@@ -144,6 +152,56 @@ def _setup_db(kind, base_url, force):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _setup_corpus(url, force, exclude_dirs):
+    """Download the ESP32 corpus zip and split it into source/ + source_code/."""
+    src_root = os.path.join(SKILL_DIR, 'source')
+    code_root = os.path.join(SKILL_DIR, 'source_code')
+
+    def _has_content(path):
+        return os.path.isdir(path) and any(os.scandir(path))
+
+    if not force and (_has_content(src_root) or _has_content(code_root)):
+        log("[skip] corpus: source/ or source_code/ already has content "
+            "(use --force to replace)")
+        return True
+
+    tmpdir = tempfile.mkdtemp(prefix='esp32rag-corpus-')
+    try:
+        zip_path = os.path.join(tmpdir, 'esp32.zip')
+        _download(url, zip_path)
+        log("[extract] corpus archive")
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmpdir)
+
+        roots = [os.path.join(tmpdir, e) for e in os.listdir(tmpdir)
+                 if os.path.isdir(os.path.join(tmpdir, e)) and e != '__MACOSX']
+        if not roots:
+            raise ValueError('cannot locate extracted corpus root')
+        root = roots[0]
+
+        os.makedirs(src_root, exist_ok=True)
+        os.makedirs(code_root, exist_ok=True)
+        moved = 0
+        for name in sorted(os.listdir(root)):
+            src = os.path.join(root, name)
+            if not os.path.isdir(src) or name in exclude_dirs:
+                continue
+            dest = os.path.join(
+                code_root if name == CODE_DIR_NAME else src_root, name)
+            if os.path.exists(dest):
+                shutil.rmtree(dest)
+            log(f"[corpus] {name} -> {dest}")
+            shutil.move(src, dest)
+            moved += 1
+        log(f"[ok] corpus split into source/ and source_code/ ({moved} dirs)")
+        return moved > 0
+    except Exception as exc:
+        log(f"[error] corpus: {exc}")
+        return False
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def _setup_models(args):
     from scripts import download_models as dm
 
@@ -180,8 +238,17 @@ def main():
                     help='use https://hf-mirror.com (useful in China)')
     ap.add_argument('--base-url', default=os.environ.get('RAG_DATA_URL', DEFAULT_DATA_URL),
                     help='base URL of the release assets (or env RAG_DATA_URL)')
+    ap.add_argument('--corpus', action='store_true',
+                    help='also download the ESP32 corpus and split it into '
+                         'source/ and source_code/ (large)')
+    ap.add_argument('--corpus-url',
+                    default=os.environ.get('RAG_CORPUS_URL', DEFAULT_CORPUS_URL),
+                    help='corpus zip URL (or env RAG_CORPUS_URL)')
+    ap.add_argument('--exclude-dir', action='append', default=[],
+                    dest='exclude_dirs', metavar='NAME',
+                    help='top-level corpus directory to skip (repeatable)')
     ap.add_argument('--force', action='store_true',
-                    help='overwrite existing vector databases')
+                    help='overwrite existing vector databases and corpus')
     args = ap.parse_args()
 
     if args.mirror:
@@ -199,6 +266,11 @@ def main():
         for kind in kinds:
             log(f"== {kind} database ==")
             ok = _setup_db(kind, args.base_url, args.force) and ok
+
+    if args.corpus:
+        log("== corpus ==")
+        ok = _setup_corpus(args.corpus_url, args.force,
+                           set(args.exclude_dirs)) and ok
 
     log("")
     if ok:

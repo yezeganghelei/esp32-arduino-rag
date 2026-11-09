@@ -88,9 +88,23 @@ The helper:
 - downloads and extracts `.chroma_esp32_all/` (and optionally `.chroma_esp32_code/`);
 - creates `.env` from `.env.example` if missing (set `LLM_API_KEY` for chat).
 
-Options: `--db none` (models only), `--mirror` (HuggingFace mirror), `--force`
-(overwrite existing DBs), `--model <name>`. The prebuilt DBs use the default
-embedding model (`bge-base-en-v1.5`); if you switch models, rebuild (§6).
+Options: `--db none` (models only), `--corpus` (also fetch the source corpus,
+see below), `--mirror` (HuggingFace mirror), `--force` (overwrite existing DBs),
+`--model <name>`. The prebuilt DBs use the default embedding model
+(`bge-base-en-v1.5`); if you switch models, rebuild (§6).
+
+**Optional corpus** (needed only for deeper source-file excerpts in answers;
+retrieval works without it). The corpus lives in a single repo
+(`yezeganghelei/ESP32`), so `setup --corpus` downloads it and splits it:
+
+```powershell
+.\setup.ps1 --db all --corpus      # Windows
+./setup.sh --db all --corpus       # Linux/macOS
+```
+
+Split rule: `01. Software Code` → `source_code/`; every other top-level
+directory → `source/`. Use `--exclude-dir NAME` to skip directories (e.g.
+`--exclude-dir "Products"`).
 
 If no prebuilt release is available, or you use a custom corpus, build locally
 after placing documents in `source/` (see §6):

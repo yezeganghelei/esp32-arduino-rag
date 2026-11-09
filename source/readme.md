@@ -22,6 +22,12 @@ Get the documentation files from GitHub:
 
 https://github.com/yezeganghelei/ESP32
 
+The ESP32 repository is a **single tree**. The fastest way to populate both
+directories is `./setup.sh --corpus` (or `.\setup.ps1 --corpus`), which splits
+it automatically: `01. Software Code` goes to `source_code/`, every other
+top-level directory goes here. To do it by hand, move `01. Software Code` to
+`source_code/` and everything else into this directory.
+
 ## Current contents
 
 - `02. Hardware Documents/`

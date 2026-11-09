@@ -30,6 +30,10 @@ Get the source-code files from GitHub:
 
 https://github.com/yezeganghelei/ESP32
 
+The ESP32 repository is a **single tree**. `./setup.sh --corpus` (or
+`.\setup.ps1 --corpus`) downloads it and moves `01. Software Code` here
+automatically (the other top-level directories go to `source/`).
+
 ## Current contents
 
 - `01. Software Code/`
