@@ -158,7 +158,14 @@ def _setup_corpus(url, force, exclude_dirs):
     code_root = os.path.join(SKILL_DIR, 'source_code')
 
     def _has_content(path):
-        return os.path.isdir(path) and any(os.scandir(path))
+        if not os.path.isdir(path):
+            return False
+        for entry in os.scandir(path):
+            # A tracked readme.md (or placeholder) does not count as corpus.
+            if entry.name.lower() in ('readme.md', '.gitkeep'):
+                continue
+            return True
+        return False
 
     if not force and (_has_content(src_root) or _has_content(code_root)):
         log("[skip] corpus: source/ or source_code/ already has content "
