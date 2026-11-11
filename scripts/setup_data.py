@@ -78,16 +78,21 @@ def _sha256_file(path, chunk_size=1024 * 1024):
 
 
 def _download(url, dest, expected_sha=None, expected_size=None):
-    """Download with a few retries (network/DNS can be flaky)."""
+    """Download with retries/backoff (network and DNS can be flaky)."""
     import time
+    retries = max(1, int(os.environ.get('RAG_DOWNLOAD_RETRIES', '6')))
+    delay = 3
     last = None
-    for attempt in range(1, 4):
+    for attempt in range(1, retries + 1):
         try:
             return _download_once(url, dest, expected_sha, expected_size)
         except Exception as exc:
             last = exc
-            log(f"[warn] download failed ({attempt}/3): {exc}")
-            time.sleep(2 * attempt)
+            log(f"[warn] download failed ({attempt}/{retries}): {exc}")
+            if attempt < retries:
+                log(f"       retrying in {delay}s ...")
+                time.sleep(delay)
+                delay = min(delay * 2, 30)
     raise last
 
 
