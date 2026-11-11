@@ -60,8 +60,8 @@ DEFAULT_EXCLUDE_DIRS = {
 UA = {'User-Agent': 'esp-rag-setup/1.0'}
 
 
-def log(msg):
-    print(msg, flush=True)
+def log(msg, **kwargs):
+    print(msg, flush=True, **kwargs)
 
 
 def _open(url):
@@ -78,6 +78,20 @@ def _sha256_file(path, chunk_size=1024 * 1024):
 
 
 def _download(url, dest, expected_sha=None, expected_size=None):
+    """Download with a few retries (network/DNS can be flaky)."""
+    import time
+    last = None
+    for attempt in range(1, 4):
+        try:
+            return _download_once(url, dest, expected_sha, expected_size)
+        except Exception as exc:
+            last = exc
+            log(f"[warn] download failed ({attempt}/3): {exc}")
+            time.sleep(2 * attempt)
+    raise last
+
+
+def _download_once(url, dest, expected_sha=None, expected_size=None):
     log(f"[download] {url}")
     h = hashlib.sha256()
     with _open(url) as r, open(dest, 'wb') as f:
@@ -109,12 +123,21 @@ def _setup_db(kind, base_url, force):
     target = os.path.join(SKILL_DIR, arcname)
     manifest_url = f"{base_url.rstrip('/')}/esp32-rag-{kind}-manifest.json"
 
-    try:
-        with _open(manifest_url) as r:
-            manifest = json.load(r)
-    except Exception as exc:
-        log(f"[warn] {kind}: cannot fetch manifest ({exc})")
-        log(f"       Prebuilt data is not published (or the URL is wrong).")
+    import time
+    manifest = None
+    last = None
+    for attempt in range(1, 4):
+        try:
+            with _open(manifest_url) as r:
+                manifest = json.load(r)
+            break
+        except Exception as exc:
+            last = exc
+            log(f"[warn] {kind}: manifest fetch failed ({attempt}/3): {exc}")
+            time.sleep(2 * attempt)
+    if manifest is None:
+        log(f"[warn] {kind}: cannot fetch manifest ({last})")
+        log("       Prebuilt data is not published (or the URL is wrong).")
         return False
 
     if (os.path.isfile(os.path.join(target, 'chroma.sqlite3')) and not force):
