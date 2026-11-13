@@ -6,98 +6,46 @@
 
 ## Quick Start
 
-> Requires Python 3.10+ and ~2 GB free disk for the default models.
+> Requires Docker. The setup helper downloads the models and prebuilt vector
+> databases; the runtime image is pulled from GHCR.
 
-1. **Clone and install dependencies**
-   ```bash
-   git clone https://github.com/yezeganghelei/esp32-arduino-rag.git esp-rag
-   cd esp-rag
-   python -m venv .venv
-   # Windows: .\.venv\Scripts\Activate.ps1
-   # Linux/macOS: source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
+```bash
+# 1) clone
+git clone https://github.com/yezeganghelei/esp32-arduino-rag.git
+cd esp32-arduino-rag
 
-2. **Download the models** (not committed to Git). This fetches the models configured in `config.yaml`:
-   ```bash
-   python -m scripts.download_models            # defaults (enough to run)
-   python -m scripts.download_models --all      # all supported models
-   python -m scripts.download_models --list     # show status, download nothing
-   python -m scripts.download_models --mirror   # use https://hf-mirror.com (China)
-   ```
-   Models are stored under `models/dense/<name>/` and `models/cross-encoder/<name>/`. `embeddinggemma-300m-npu` uses the Nexa NPU format and must be fetched manually.
+# 2) download models + prebuilt vector DBs (+ optional corpus)
+./setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
 
-3. **Provide the corpora** — there are two independent corpora:
-   - **Documentation** → put your ESP32 docs under `source/`, or point `RAG_DOCS_DIR` at any directory (see §6.4).
-   - **Source code** (optional, for code search) → put the code under `source_code/`, or set `code.docs_dir` in `config.yaml` (see §6.5).
+# 3) configure the LLM in .env (required for chat; retrieval works without it)
+#    LLM_API_KEY=sk-...
+#    LLM_BASE_URL=https://api.deepseek.com/v1
+#    LLM_MODEL=deepseek-chat
 
-4. **Configure the LLM** (only needed for chat / answer generation):
-   ```bash
-   cp .env.example .env
-   ```
-   Set `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` in `.env`.
+# 4) start the service (the key is read at container start)
+docker compose up -d
+```
 
-5. **Build the index, then query**
-   ```bash
-   python -m scripts.build.run              # documentation DB -> .chroma_esp32_all/
-   # optional: build the source-code DB -> .chroma_esp32_code/
-   #   Windows PowerShell: $env:RAG_INDEX_CODE="1"; python -m scripts.build.run
-   #   Linux/macOS:        RAG_INDEX_CODE=1 python -m scripts.build.run
-   python scripts/agent.py "ESP32-S3 boot process" --top 5
-   ```
+- Web UI: http://localhost:7860
+- API docs: http://localhost:8000/docs
+- MCP (SSE): http://localhost:8001/sse
 
-   Run as a service:
-   ```bash
-   uvicorn scripts.api.server:app --port 8000   # FastAPI
-   python -m scripts.web.app                    # Gradio UI on :7860
-   # or with Docker (pulls the published image; see §10):
-   docker compose up -d
-   ```
+> Set `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` **before** `docker compose up`.
+> After changing `.env`, apply it with `docker compose up -d --force-recreate`.
 
-> **Fast path**: steps 2, 3 and 5 can be replaced by `.\setup.ps1` (Windows) or
-> `./setup.sh` (Linux/macOS) — see *Prebuilt Data Setup* below — then run
-> `docker compose up -d`.
+For a **manual / offline setup** (your own Python environment and index builds),
+see §6. Docker details: §10.
 
 > The `source/` and `source_code/` documents are Espressif materials and are **not** included; obtain them from Espressif and comply with their licenses.
 
-## Prebuilt Data Setup (recommended)
+## Setup Details
 
-Building the index can take hours (the source-code corpus is very large), and
-the models are not in Git. The helper scripts below download the models and
-the **prebuilt vector databases** from the `data-v1` GitHub Release, so you can
-start the service in minutes.
-
-**Install**
-
-```bash
-git clone https://github.com/yezeganghelei/esp32-arduino-rag.git
-cd esp32-arduino-rag
-./setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
-```
-
-Then edit `.env` and fill in the LLM settings (required for chat; retrieval
-works without them):
-
-```dotenv
-LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-chat
-```
-
-Finally start the service:
-
-```bash
-docker compose up -d        # Web UI :7860, API :8000, MCP :8001
-```
-
-> `.env` is read when the container starts, so set it **before**
-> `docker compose up`. If you change it later, apply it with
-> `docker compose up -d --force-recreate`.
-
-The helper:
-- downloads the models configured in `config.yaml` into `models/`;
-- downloads and extracts `.chroma_esp32_all/` (and optionally `.chroma_esp32_code/`);
-- creates `.env` from `.env.example` if it is missing.
+The `setup` helper downloads the models configured in `config.yaml` into
+`models/`, downloads and extracts `.chroma_esp32_all/` (and optionally
+`.chroma_esp32_code/`) from the `data-v1` GitHub Release, and creates `.env`
+from `.env.example` if it is missing. Building the indexes yourself is much
+slower (the source-code corpus can take hours), so the prebuilt data is
+recommended.
 
 Options: `--db none` (models only), `--corpus` (also fetch the source corpus,
 see below), `--mirror` (HuggingFace mirror), `--force` (overwrite existing DBs),
