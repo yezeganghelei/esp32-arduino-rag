@@ -38,6 +38,57 @@ see §6. Docker details: §10.
 
 > The `source/` and `source_code/` documents are Espressif materials and are **not** included; obtain them from Espressif and comply with their licenses.
 
+## Usage
+
+### 1. Web chat
+
+Open http://localhost:7860 and chat with the knowledge base. The Gradio UI calls
+the FastAPI backend on http://localhost:8000. Chat needs `LLM_API_KEY`; pure
+retrieval does not.
+
+### 2. MCP
+
+The `all` mode also starts the MCP server at `http://localhost:8001/sse`. Add it
+to an MCP-capable client (Claude Desktop, Cursor, etc.):
+
+```json
+{
+  "mcpServers": {
+    "esp-rag": { "url": "http://localhost:8001/sse" }
+  }
+}
+```
+
+Tools: `search_esp_docs`, `search_esp_code`, `search_esp` (raw retrieval, no LLM
+key needed). Per-client examples and the local stdio variant are in
+[`docs/mcp-client-config.md`](docs/mcp-client-config.md).
+
+### 3. opencode skill
+
+This repository is itself an opencode skill (`SKILL.md` at the root). With
+`opencode.json` → `skills.paths: ["."]`, starting opencode in this directory
+auto-discovers the skill `esp-rag`; an ESP32 question then triggers
+`scripts/agent.py`. To use it from any directory, junction this repo into
+`~/.config/opencode/skills/esp-rag` or add its path to the global
+`skills.paths` (see §9).
+
+### 4. CLI
+
+Run a one-shot query inside the container (no local Python needed):
+
+```bash
+docker compose run --rm esp-rag "ESP32-S3 boot process" --top 5
+```
+
+Or on the host with a Python environment (see §5/§6):
+
+```bash
+python scripts/agent.py "ESP32-S3 boot process" --top 5
+```
+
+Flags: `--top N`, `--type <doc_type>`, `--docs-only`, `--code`, `--raw` (JSON).
+See §5 for details.
+
 ## Setup Details
 
 The `setup` helper downloads the models configured in `config.yaml` into
