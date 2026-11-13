@@ -14,9 +14,15 @@ retrieval does not.
 
 ### 2. MCP
 
-The default `all` mode (`docker compose up -d`) starts the MCP server at
-`http://localhost:8001/sse`. Add it to an MCP-capable client (Claude Desktop,
-Cursor, etc.):
+MCP lets AI clients (Claude Desktop, Cursor, etc.) search this knowledge base.
+
+It is **already running** after `docker compose up -d`. The address is:
+
+```
+http://localhost:8001/sse
+```
+
+Add it to your client, e.g. Claude Desktop `claude_desktop_config.json`:
 
 ```json
 {
@@ -26,42 +32,34 @@ Cursor, etc.):
 }
 ```
 
-`mcp` starts the MCP **server** (it does not take a query). `--service-ports`
-publishes **all** of the service's ports, so stop the full stack first (otherwise
-8000/7860/8001 are already in use):
+The client can then call these tools:
+
+- `search_esp_docs` — search the documentation
+- `search_esp_code` — search the source code
+- `search_esp` — search both
+
+**Quick commands**
 
 ```bash
+# start everything (includes the MCP server)
+docker compose up -d
+
+# check that MCP is running: look for "MCP server starting ... port=8001"
+docker compose logs --tail 20 esp-rag
+
+# liveness check: opens the SSE stream for 3 seconds, then exits
+curl -N --max-time 3 http://localhost:8001/sse
+
+# run MCP by itself (stop the full stack first so port 8001 is free)
 docker compose down
 docker compose run --rm --service-ports esp-rag mcp
-```
 
-While the full stack is running, start a second MCP instance on another host
-port instead (only 8001 is published):
-
-```bash
-docker compose run --rm -p 18001:8001 esp-rag mcp   # client: http://localhost:18001/sse
-```
-
-For a one-shot CLI query (not MCP), see §4:
-```bash
+# quick one-shot query without MCP (for comparison)
 docker compose run --rm esp-rag "ESP32-S3 Wi-Fi performance" --top 5
 ```
 
-Or with plain Docker:
-
-```bash
-docker run --rm -p 8001:8001 \
-  --env-file .env \
-  -v "$PWD/models:/app/models:ro" \
-  -v "$PWD/source:/app/source:ro" \
-  -v "$PWD/.chroma_esp32_all:/app/.chroma_esp32_all" \
-  -v "$PWD/.chroma_esp32_code:/app/.chroma_esp32_code" \
-  ghcr.io/yezeganghelei/esp32-arduino-rag:latest mcp
-```
-
-Tools: `search_esp_docs`, `search_esp_code`, `search_esp` (raw retrieval, no LLM
-key needed). Per-client examples and the local stdio variant are in
-[`docs/mcp-client-config.md`](docs/mcp-client-config.md).
+MCP only returns retrieved snippets, so it does **not** need `LLM_API_KEY`.
+More client examples: [`docs/mcp-client-config.md`](docs/mcp-client-config.md).
 
 ### 3. opencode skill
 
