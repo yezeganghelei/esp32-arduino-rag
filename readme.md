@@ -26,11 +26,25 @@ Cursor, etc.):
 }
 ```
 
-Run MCP on its own with Docker (stop the full stack first so port 8001 is free):
+`mcp` starts the MCP **server** (it does not take a query). `--service-ports`
+publishes **all** of the service's ports, so stop the full stack first (otherwise
+8000/7860/8001 are already in use):
 
 ```bash
 docker compose down
 docker compose run --rm --service-ports esp-rag mcp
+```
+
+While the full stack is running, start a second MCP instance on another host
+port instead (only 8001 is published):
+
+```bash
+docker compose run --rm -p 18001:8001 esp-rag mcp   # client: http://localhost:18001/sse
+```
+
+For a one-shot CLI query (not MCP), see §4:
+```bash
+docker compose run --rm esp-rag "ESP32-S3 Wi-Fi performance" --top 5
 ```
 
 Or with plain Docker:
@@ -44,10 +58,6 @@ docker run --rm -p 8001:8001 \
   -v "$PWD/.chroma_esp32_code:/app/.chroma_esp32_code" \
   ghcr.io/yezeganghelei/esp32-arduino-rag:latest mcp
 ```
-
-To keep MCP running alongside the full stack, map a different host port, e.g.
-`docker compose run --rm -p 18001:8001 esp-rag mcp`, then use
-`http://localhost:18001/sse` in the client.
 
 Tools: `search_esp_docs`, `search_esp_code`, `search_esp` (raw retrieval, no LLM
 key needed). Per-client examples and the local stdio variant are in
