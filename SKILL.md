@@ -5,16 +5,36 @@ user_prompt: |
   Query the ESP32 documentation & source-code knowledge base.
 
   Usage:
-    esp-rag "<question>"        # full RAG answer (docs + code, with citations)
+    python <skill_dir>/scripts/agent.py "<question>"   # full RAG answer (docs + code, with citations)
 
   Examples:
-    esp-rag "ESP32-S3 的 GPIO 中断怎么配置？"
+    python <skill_dir>/scripts/agent.py "ESP32-S3 的 GPIO 中断怎么配置？"
 ---
 
 Query the ESP32 knowledge base using a ChromaDB-powered RAG index. The agent runs
 the **SAME RAG flow as the web chat**: LLM query rewrite → retrieval (docs + code)
 → answer generation. It returns a **complete answer with `[Source: ...]` citations
 and a source list** — not raw chunks.
+
+## Before you start (required once)
+
+The models and vector databases are **not** stored in this repository. Fetch them
+before the first query (the helper needs Docker; it does not start the server):
+
+```bash
+./setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
+```
+
+This fills `models/`, `.chroma_esp32_all/`, `.chroma_esp32_code/`, and (with
+`--corpus`) `source/` + `source_code/`.
+
+Manual alternative: install `requirements.txt`, run
+`python -m scripts.download_models`, place documents in `source/` and code in
+`source_code/`, then `python -m scripts.build.run`
+(`RAG_INDEX_CODE=1 python -m scripts.build.run` for the code DB).
+
+If the Docker stack is already running, you can skip the local venv and query
+with `docker compose run --rm esp-rag "<question>"`.
 
 ## Workflow
 
@@ -173,17 +193,22 @@ py -m venv .venv
 
 ## Directory structure
 
-- `<skill_dir>/source/` — raw source documents (PDF, ZIP, XLSX, MD), organized by SoC series and document type (corpus pointed to via `RAG_DOCS_DIR` / `code.docs_dir`)
-- `<skill_dir>/source_code/` — source-code corpus (optional, for the code DB)
-- `<skill_dir>/.chroma_esp32_all/` — ChromaDB vector index for **documentation** (persisted, file_hash (MD5) tracking + BM25 cache `_bm25_cache.pkl`)
-- `<skill_dir>/.chroma_esp32_code/` — ChromaDB vector index for **source code** (opt-in, see the `code:` block in config.yaml)
+Items marked **(not in Git)** are fetched/created by `setup` (see *Before you start*).
+
+- `<skill_dir>/source/` — raw source documents (PDF, ZIP, XLSX, MD), organized by SoC series and document type (corpus pointed to via `RAG_DOCS_DIR` / `code.docs_dir`) **(not in Git; fetched with `--corpus`)**
+- `<skill_dir>/source_code/` — source-code corpus (optional, for the code DB) **(not in Git; fetched with `--corpus`)**
+- `<skill_dir>/.chroma_esp32_all/` — ChromaDB vector index for **documentation** (persisted, file_hash (MD5) tracking + BM25 cache `_bm25_cache.pkl`) **(not in Git; fetched/built by `setup`)**
+- `<skill_dir>/.chroma_esp32_code/` — ChromaDB vector index for **source code** (opt-in, see the `code:` block in config.yaml) **(not in Git; fetched/built by `setup`)**
 - `<skill_dir>/config.yaml` — document classification, weights, models, code block, etc.
+- `<skill_dir>/setup.ps1` / `setup.sh` — one-command data setup (models + prebuilt DBs + optional corpus)
+- `<skill_dir>/scripts/setup_data.py` — data setup helper (models + DB download + corpus split)
+- `<skill_dir>/scripts/download_models.py` — download models from HuggingFace
 - `<skill_dir>/scripts/main.py` — RAG engine (index build, search, hex boosting, BM25 cache)
 - `<skill_dir>/scripts/rag_api.py` — unified retrieval interface (`search` / `run_query` / `multi_search`)
 - `<skill_dir>/scripts/agent.py` — one-shot CLI entry: **full RAG answer** (same flow as web & MCP)
 - `<skill_dir>/scripts/api/chat.py` — shared `rag_answer()` (used by web / MCP / CLI) + stage logging
 - `<skill_dir>/scripts/mcp/server.py` — MCP Server (tools also use `rag_answer`)
-- `<skill_dir>/models/` — local offline models
+- `<skill_dir>/models/` — local offline models **(not in Git; downloaded by `setup` / `scripts/download_models.py`)**
   - `models/dense/` — bi-encoder embedding models (bge-base-en-v1.5 default; all-MiniLM-L6-v2, gte-base-en-v1.5, embeddinggemma-300m-npu)
   - `models/cross-encoder/` — cross-encoder reranking model (cross-encoder-ms-marco-MiniLM-L-6-v2)
 - `<skill_dir>/logs/` — runtime logs (`agent.log`, `mcp.log`, …)
