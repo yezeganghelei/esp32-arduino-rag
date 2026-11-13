@@ -31,10 +31,11 @@
    - **Documentation** → put your ESP32 docs under `source/`, or point `RAG_DOCS_DIR` at any directory (see §6.4).
    - **Source code** (optional, for code search) → put the code under `source_code/`, or set `code.docs_dir` in `config.yaml` (see §6.5).
 
-4. **Configure the LLM key** (only needed for chat / answer generation):
+4. **Configure the LLM** (only needed for chat / answer generation):
    ```bash
-   cp .env.example .env   # then edit LLM_API_KEY
+   cp .env.example .env
    ```
+   Set `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` in `.env`.
 
 5. **Build the index, then query**
    ```bash
@@ -66,32 +67,37 @@ the models are not in Git. The helper scripts below download the models and
 the **prebuilt vector databases** from the `data-v1` GitHub Release, so you can
 start the service in minutes.
 
-Windows (PowerShell):
-```powershell
-.\setup.ps1                 # models + documentation DB
-.\setup.ps1 --db all        # + source-code DB
+**Install**
+
+```bash
+git clone https://github.com/yezeganghelei/esp32-arduino-rag.git
+cd esp32-arduino-rag
+./setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
 ```
 
-Linux / macOS:
-```bash
-./setup.sh                  # models + documentation DB
-./setup.sh --db all         # + source-code DB
+Then edit `.env` and fill in the LLM settings (required for chat; retrieval
+works without them):
+
+```dotenv
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_MODEL=deepseek-chat
 ```
+
+Finally start the service:
+
+```bash
+docker compose up -d        # Web UI :7860, API :8000, MCP :8001
+```
+
+> `.env` is read when the container starts, so set it **before**
+> `docker compose up`. If you change it later, apply it with
+> `docker compose up -d --force-recreate`.
 
 The helper:
 - downloads the models configured in `config.yaml` into `models/`;
 - downloads and extracts `.chroma_esp32_all/` (and optionally `.chroma_esp32_code/`);
 - creates `.env` from `.env.example` if it is missing.
-
-**Set the LLM key, then start the service:**
-```bash
-# Edit .env and set LLM_API_KEY=... (required for chat; retrieval works without it)
-docker compose up -d        # Web UI :7860, API :8000, MCP :8001
-```
-
-> `LLM_API_KEY` is read when the container starts, so set it **before**
-> `docker compose up`. If you change `.env` later, apply it with
-> `docker compose up -d --force-recreate`.
 
 Options: `--db none` (models only), `--corpus` (also fetch the source corpus,
 see below), `--mirror` (HuggingFace mirror), `--force` (overwrite existing DBs),
@@ -756,7 +762,7 @@ The image contains **code + Python dependencies only** (Scheme A): models, docum
   ```
 - `docker compose` reads `.env` automatically; copy and edit it:
   ```bash
-  cp .env.example .env   # set LLM_API_KEY
+  cp .env.example .env   # set LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
   ```
 
 ### 10.2 Start the stack
