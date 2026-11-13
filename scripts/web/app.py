@@ -350,6 +350,7 @@ def chat_stream(
                 "use_history": True,
                 "stream": True,
                 "kind": kb_kind,
+                "language": lang,
             },
             timeout=300.0,
             headers={"Accept": "text/event-stream"},

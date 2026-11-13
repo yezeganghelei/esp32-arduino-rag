@@ -53,6 +53,24 @@ SYSTEM_PROMPT = """你是一位专业的 ESP32 技术支持工程师，基于乐
 ---
 """
 
+_LANG_INSTRUCTION = {
+    'en': 'Answer in English.',
+    'zh': '请用中文回答。',
+    'de': 'Antworte auf Deutsch.',
+}
+
+
+def _language_instruction(language: str) -> str:
+    """Language rule for the answer ('auto' follows the user's question)."""
+    return _LANG_INSTRUCTION.get(
+        (language or 'auto').lower(),
+        "Answer in the same language as the user's question.")
+
+
+def _system_prompt(language: str) -> str:
+    return (SYSTEM_PROMPT
+            + f"\n重要 / IMPORTANT: {_language_instruction(language)}\n")
+
 
 # ── Data models ─────────────────────────────────────────────────────
 
@@ -337,14 +355,16 @@ class RAGChat:
             parts.append(block)
         return "\n\n---\n\n".join(parts)
 
-    def _build_user_prompt(self, query: str, sources: List[SourceDoc]) -> str:
+    def _build_user_prompt(self, query: str, sources: List[SourceDoc],
+                           language: str = 'auto') -> str:
         """Build the full user prompt with context."""
         context = self._build_context(sources)
         return (
             f"参考文档：\n\n{context}\n\n"
             f"====================\n\n"
             f"用户问题：{query}\n\n"
-            f"请基于以上参考文档回答用户的问题。如果参考文档中没有相关内容，请明确说明。"
+            f"请基于以上参考文档回答用户的问题。如果参考文档中没有相关内容，请明确说明。\n"
+            f"{_language_instruction(language)}"
         )
 
     async def ask(
@@ -353,6 +373,7 @@ class RAGChat:
         session_id: Optional[str] = None,
         doc_type: Optional[str] = None,
         use_history: bool = True,
+        language: str = 'auto',
     ) -> Tuple[str, List[SourceDoc], str]:
         """Ask a question and get a full answer (non-streaming).
 
@@ -369,13 +390,13 @@ class RAGChat:
         sources = await self._gather_sources(query, route, doc_type)
 
         # Build prompt
-        user_prompt = self._build_user_prompt(query, sources)
+        user_prompt = self._build_user_prompt(query, sources, language)
         history = session.history if use_history else None
 
         # Call LLM
         config = LLMConfig()
         answer = await chat_completion(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=_system_prompt(language),
             user_message=user_prompt,
             history=history,
             config=config,
@@ -393,6 +414,7 @@ class RAGChat:
         session_id: Optional[str] = None,
         doc_type: Optional[str] = None,
         use_history: bool = True,
+        language: str = 'auto',
     ) -> AsyncIterator[Dict[str, Any]]:
         """Ask a question with streaming response.
 
@@ -430,7 +452,7 @@ class RAGChat:
             yield {"type": "sources", "data": sources_data}
 
             # Build prompt
-            user_prompt = self._build_user_prompt(query, sources)
+            user_prompt = self._build_user_prompt(query, sources, language)
             history = session.history if use_history else None
 
             # Stream LLM response
@@ -440,7 +462,7 @@ class RAGChat:
             yield {"type": "progress", "stage": "answer", "content": "生成回答中…"}
 
             async for delta in chat_completion_stream(
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=_system_prompt(language),
                 user_message=user_prompt,
                 history=history,
                 config=config,
@@ -483,7 +505,8 @@ def format_rag_answer(answer: str, sources: List[SourceDoc]) -> str:
 
 async def rag_answer(query: str, top_k: int = 8,
                      doc_type: Optional[str] = None,
-                     mode: str = "auto") -> Tuple[str, List[SourceDoc]]:
+                     mode: str = "auto",
+                     language: str = "auto") -> Tuple[str, List[SourceDoc]]:
     """One-shot RAG answer: rewrite -> retrieve (docs+code) -> generate.
 
     This is the single shared flow used by the web chat, the MCP server and the
@@ -494,5 +517,6 @@ async def rag_answer(query: str, top_k: int = 8,
     """
     forced = None if mode == "auto" else mode
     chat = RAGChat(top_k=top_k, forced_mode=forced)
-    answer, sources, _ = await chat.ask(query, doc_type=doc_type, use_history=False)
+    answer, sources, _ = await chat.ask(
+        query, doc_type=doc_type, use_history=False, language=language)
     return answer, sources

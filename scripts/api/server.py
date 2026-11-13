@@ -238,6 +238,7 @@ class ChatRequest(BaseModel):
     use_history: bool = Field(True, description="Use conversation history")
     stream: bool = Field(False, description="Stream the response (SSE)")
     kind: str = Field("auto", description="Knowledge base to use: 'auto' (docs+code merged), 'docs' or 'code'")
+    language: str = Field("auto", description="Answer language: 'auto' (same as question), 'en', 'zh' or 'de'")
 
 
 class ChatSource(BaseModel):
@@ -313,6 +314,7 @@ async def chat(req: ChatRequest):
             session_id=req.session_id,
             doc_type=req.doc_type,
             use_history=req.use_history,
+            language=req.language,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -352,6 +354,7 @@ async def _chat_stream(req: ChatRequest):
         session_id=req.session_id,
         doc_type=req.doc_type,
         use_history=req.use_history,
+        language=req.language,
     ):
         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
