@@ -4,40 +4,6 @@
 
 > **What is (and isn't) in this repository**: this repo ships **code + config only**. The `models/`, `source/`, `source_code/`, `.chroma_*` directories and `.env` are **not** committed (see `.gitignore`) — you download the models and provide your own document corpus locally. See Quick Start below.
 
-## Quick Start
-
-> Requires Docker. The setup helper downloads the models and prebuilt vector
-> databases; the runtime image is pulled from GHCR.
-
-```bash
-# 1) clone
-git clone https://github.com/yezeganghelei/esp32-arduino-rag.git
-cd esp32-arduino-rag
-
-# 2) download models + prebuilt vector DBs (+ optional corpus)
-./setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
-
-# 3) configure the LLM in .env (required for chat; retrieval works without it)
-#    LLM_API_KEY=sk-...
-#    LLM_BASE_URL=https://api.deepseek.com/v1
-#    LLM_MODEL=deepseek-chat
-
-# 4) start the service (the key is read at container start)
-docker compose up -d
-```
-
-- Web UI: http://localhost:7860
-- API docs: http://localhost:8000/docs
-- MCP (SSE): http://localhost:8001/sse
-
-> Set `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` **before** `docker compose up`.
-> After changing `.env`, apply it with `docker compose up -d --force-recreate`.
-
-For a **manual / offline setup** (your own Python environment and index builds),
-see §6. Docker details: §10.
-
-> The `source/` and `source_code/` documents are Espressif materials and are **not** included; obtain them from Espressif and comply with their licenses.
-
 ## Usage
 
 ### 1. Web chat
@@ -88,6 +54,40 @@ python scripts/agent.py "ESP32-S3 boot process" --top 5
 
 Flags: `--top N`, `--type <doc_type>`, `--docs-only`, `--code`, `--raw` (JSON).
 See §5 for details.
+
+## Quick Start
+
+> Requires Docker. The setup helper downloads the models and prebuilt vector
+> databases; the runtime image is pulled from GHCR.
+
+```bash
+# 1) clone
+git clone https://github.com/yezeganghelei/esp32-arduino-rag.git
+cd esp32-arduino-rag
+
+# 2) download models + prebuilt vector DBs (+ optional corpus)
+./setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
+
+# 3) configure the LLM in .env (required for chat; retrieval works without it)
+#    LLM_API_KEY=sk-...
+#    LLM_BASE_URL=https://api.deepseek.com/v1
+#    LLM_MODEL=deepseek-chat
+
+# 4) start the service (the key is read at container start)
+docker compose up -d
+```
+
+- Web UI: http://localhost:7860
+- API docs: http://localhost:8000/docs
+- MCP (SSE): http://localhost:8001/sse
+
+> Set `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` **before** `docker compose up`.
+> After changing `.env`, apply it with `docker compose up -d --force-recreate`.
+
+For a **manual / offline setup** (your own Python environment and index builds),
+see §6. Docker details: §10.
+
+> The `source/` and `source_code/` documents are Espressif materials and are **not** included; obtain them from Espressif and comply with their licenses.
 
 ## Setup Details
 
