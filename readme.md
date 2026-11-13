@@ -14,8 +14,9 @@ retrieval does not.
 
 ### 2. MCP
 
-The `all` mode also starts the MCP server at `http://localhost:8001/sse`. Add it
-to an MCP-capable client (Claude Desktop, Cursor, etc.):
+The default `all` mode (`docker compose up -d`) starts the MCP server at
+`http://localhost:8001/sse`. Add it to an MCP-capable client (Claude Desktop,
+Cursor, etc.):
 
 ```json
 {
@@ -24,6 +25,29 @@ to an MCP-capable client (Claude Desktop, Cursor, etc.):
   }
 }
 ```
+
+Run MCP on its own with Docker (stop the full stack first so port 8001 is free):
+
+```bash
+docker compose down
+docker compose run --rm --service-ports esp-rag mcp
+```
+
+Or with plain Docker:
+
+```bash
+docker run --rm -p 8001:8001 \
+  --env-file .env \
+  -v "$PWD/models:/app/models:ro" \
+  -v "$PWD/source:/app/source:ro" \
+  -v "$PWD/.chroma_esp32_all:/app/.chroma_esp32_all" \
+  -v "$PWD/.chroma_esp32_code:/app/.chroma_esp32_code" \
+  ghcr.io/yezeganghelei/esp32-arduino-rag:latest mcp
+```
+
+To keep MCP running alongside the full stack, map a different host port, e.g.
+`docker compose run --rm -p 18001:8001 esp-rag mcp`, then use
+`http://localhost:18001/sse` in the client.
 
 Tools: `search_esp_docs`, `search_esp_code`, `search_esp` (raw retrieval, no LLM
 key needed). Per-client examples and the local stdio variant are in
