@@ -1,10 +1,42 @@
 # ESP32 RAG Skill — Index Building and Retrieval Engine
 
-> **Note**: AI retrieval is sourced from the `ESP32` materials folder (documentation). Source code under `01.Software Code` can additionally be indexed into a **separate** database (see §6.5). To ensure answer accuracy, retrieval strictly follows the original descriptions in the source documents and cites the content sources, with no AI speculation!
+> **Note**: By default, retrieval searches the documentation corpus in `source/`. Source code (for example the `01. Software Code` materials) can additionally be indexed into a **separate** database (see §6.5). Answers are generated from the retrieved source text and cite their sources; the model is instructed not to speculate, but critical details should still be verified.
 
-> **What is (and isn't) in this repository**: this repo ships **code + config only**. The `models/`, `source/`, `source_code/`, `.chroma_*` directories and `.env` are **not** committed (see `.gitignore`) — you download the models and provide your own document corpus locally. See Quick Start below.
+> **What is (and isn't) in this repository**: this repo ships **code + config only**. The `models/`, `source/`, `source_code/`, `.chroma_*` directories and `.env` are **not** committed (see `.gitignore`). The `setup` helper downloads the models and prebuilt vector databases, or you can provide your own corpus and build the index locally. See Quick Start below.
 
-## Usage
+## Quick Start
+
+> First time here? Four steps from clone to a running chat UI (requires Docker).
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yezeganghelei/esp32-arduino-rag.git
+   cd esp32-arduino-rag
+   ```
+2. **Download models, prebuilt vector DBs and the corpus**
+   ```bash
+   bash setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
+   ```
+3. **Configure the LLM** in `.env` (created by setup): set `LLM_API_KEY`.
+   `LLM_BASE_URL` and `LLM_MODEL` already default to DeepSeek.
+4. **Build and start**
+   ```bash
+   docker build -t ghcr.io/yezeganghelei/esp32-arduino-rag:latest .
+   docker compose up -d --force-recreate --pull never
+   ```
+
+- Web UI: http://localhost:7860
+- API docs: http://localhost:8000/docs
+- MCP (SSE): http://localhost:8001/sse
+
+> Retrieval works without `LLM_API_KEY`; chat generation needs it. After editing
+> `.env`, apply it with `docker compose up -d --force-recreate`. If you prefer the
+> published image, skip the build and run `docker compose up -d` directly. For a
+> manual/offline setup see §6; Docker details are in §10.
+
+> The `source/` and `source_code/` documents are Espressif materials and are **not** included; obtain them from Espressif and comply with their licenses.
+
+## Interface
 
 ### 1. Web chat
 <table>
@@ -46,21 +78,8 @@ The client can then call these tools:
 **Quick commands**
 
 ```bash
-# start everything (includes the MCP server)
-docker compose up -d
-
-# check that MCP is running: look for "MCP server starting ... port=8001"
-docker compose logs --tail 20 esp-rag
-
-# liveness check: opens the SSE stream for 3 seconds, then exits
-curl -N --max-time 3 http://localhost:8001/sse
-
-# run MCP by itself (stop the full stack first so port 8001 is free)
-docker compose down
-docker compose run --rm --service-ports esp-rag mcp
-
-# quick one-shot query without MCP (for comparison)
-docker compose run --rm esp-rag "ESP32-S3 Wi-Fi performance" --top 5
+# start 
+docker exec -w /app esp-rag python scripts/mcp/test_client.py --tool search_esp_code --query "esp_camera_init camera_config_t" --top 5
 ```
 
 MCP only returns retrieved snippets, so it does **not** need `LLM_API_KEY`.
@@ -95,40 +114,6 @@ python scripts/agent.py "ESP32-S3 boot process" --top 5
 
 Flags: `--top N`, `--type <doc_type>`, `--docs-only`, `--code`, `--raw` (JSON).
 See §5 for details.
-
-## Quick Start
-
-> Requires Docker. The setup helper downloads the models and prebuilt vector
-> databases; the runtime image is pulled from GHCR.
-
-```bash
-# 1) clone
-git clone https://github.com/yezeganghelei/esp32-arduino-rag.git
-cd esp32-arduino-rag
-
-# 2) download models + prebuilt vector DBs (+ optional corpus)
-./setup.sh --db all --corpus      # Windows: .\setup.ps1 --db all --corpus
-
-# 3) configure the LLM in .env (required for chat; retrieval works without it)
-#    LLM_API_KEY=sk-...
-#    LLM_BASE_URL=https://api.deepseek.com/v1
-#    LLM_MODEL=deepseek-chat
-
-# 4) start the service (the key is read at container start)
-docker compose up -d
-```
-
-- Web UI: http://localhost:7860
-- API docs: http://localhost:8000/docs
-- MCP (SSE): http://localhost:8001/sse
-
-> Set `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` **before** `docker compose up`.
-> After changing `.env`, apply it with `docker compose up -d --force-recreate`.
-
-For a **manual / offline setup** (your own Python environment and index builds),
-see §6. Docker details: §10.
-
-> The `source/` and `source_code/` documents are Espressif materials and are **not** included; obtain them from Espressif and comply with their licenses.
 
 ## Setup Details
 
