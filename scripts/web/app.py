@@ -60,9 +60,9 @@ DEFAULT_LANG = "zh"
 
 I18N = {
     "zh": {
-        "app_title": "ESP32 RAG 智能助手",
+        "app_title": "ESP32 Arduino RAG 智能助手",
         "lang_label": "界面语言",
-        "title": "# 🤖 ESP32 RAG 智能助手\n\n基于乐鑫官方文档和代码示例的语义检索问答系统，支持文档检索和代码检索。",
+        "title": "# 🤖 ESP32 Arduino RAG 智能助手\n\n基于官方真实文档和代码示例的语义检索问答系统，支持文档检索和代码检索。",
         "kb_title": "### 📚 知识库",
         "kb_label": "选择知识库",
         "kb_auto": "🔍 自动识别 (文档+代码)",
@@ -111,9 +111,9 @@ I18N = {
         "err_generic": "❌ 出错了",
     },
     "en": {
-        "app_title": "ESP32 RAG Assistant",
+        "app_title": "ESP32 Arduino RAG Assistant",
         "lang_label": "Interface language",
-        "title": "# 🤖 ESP32 RAG Assistant\n\nSemantic retrieval Q&A over Espressif's official documentation and code examples, with document and code search.",
+        "title": "# 🤖 ESP32 Arduino RAG Assistant\n\nSemantic retrieval Q&A over official, authentic documentation and code examples, with document and code search.",
         "kb_title": "### 📚 Knowledge Base",
         "kb_label": "Knowledge base",
         "kb_auto": "🔍 Auto (docs + code)",
@@ -162,9 +162,9 @@ I18N = {
         "err_generic": "❌ Error",
     },
     "de": {
-        "app_title": "ESP32 RAG-Assistent",
+        "app_title": "ESP32 Arduino RAG-Assistent",
         "lang_label": "Oberflächensprache",
-        "title": "# 🤖 ESP32 RAG-Assistent\n\nSemantische Such- und Antwortmaschine über offizielle Espressif-Dokumentation und Codebeispiele, mit Dokument- und Codesuche.",
+        "title": "# 🤖 ESP32 Arduino RAG-Assistent\n\nSemantische Such- und Antwortmaschine über offizielle, authentische Dokumentation und Codebeispiele, mit Dokument- und Codesuche.",
         "kb_title": "### 📚 Wissensdatenbank",
         "kb_label": "Wissensdatenbank",
         "kb_auto": "🔍 Automatisch (Doku + Code)",
@@ -437,6 +437,11 @@ async def _check_api_status(lang: str = DEFAULT_LANG) -> str:
 
 # ── Language switch (updates every localized component) ─────────────
 
+def _placeholder_update(lang: str) -> dict:
+    """Placeholder-only update for the message input (keeps its current value)."""
+    return gr.update(placeholder=_tr(lang, "placeholder"))
+
+
 async def switch_language(lang: str, cur_kb: str, cur_doc_type: Optional[str]):
     """Update all UI text components when the interface language changes."""
     def t(k):
@@ -458,7 +463,7 @@ async def switch_language(lang: str, cur_kb: str, cur_doc_type: Optional[str]):
         gr.update(value=t("status_title")),                            # status_md
         gr.update(label=t("api_label"), value=status_val),             # api_status
         gr.update(label=t("chatbot_label")),                           # chatbot
-        gr.update(placeholder=t("placeholder")),                       # msg_input
+        _placeholder_update(lang),                                     # msg_input
         gr.update(value=t("send")),                                    # send_btn
         gr.update(visible=(lang == "zh")),                             # examples_col_zh
         gr.update(visible=(lang == "en")),                             # examples_col_en
@@ -477,14 +482,121 @@ def build_ui() -> gr.Blocks:
         title=_tr(lang0, "app_title"),
         theme=gr.themes.Soft(),
         css="""
-        .chatbot { height: 70vh !important; }
-        .sidebar { background: var(--color-background-secondary); }
+        /* ── Plain background: soft tint + subtle dot grid ── */
+        body,
+        .gradio-container {
+            background-color: var(--body-background-fill, #f7f7f9) !important;
+            background-image:
+                radial-gradient(circle at 1px 1px, rgba(120, 120, 130, 0.10) 1px, transparent 0),
+                linear-gradient(180deg, rgba(99, 102, 241, 0.05), rgba(99, 102, 241, 0) 340px);
+            background-size: 22px 22px, 100% 100%;
+            background-attachment: fixed;
+        }
+        .gradio-container {
+            max-width: 1440px;
+            margin: 0 auto !important;
+            padding: 16px !important;
+        }
+
+        /* ── Surfaces ── */
+        .app-header,
+        .sidebar,
+        .chat-panel {
+            background: var(--block-background-fill, #ffffff);
+            border: 1px solid var(--border-color-primary, #e5e7eb);
+            border-radius: 16px;
+            box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04),
+                        0 10px 28px rgba(16, 24, 40, 0.05);
+        }
+        .app-header {
+            padding: 14px 22px !important;
+            margin-bottom: 14px;
+            align-items: center;
+        }
+        .brand h1 {
+            margin: 0 !important;
+            font-size: 1.55rem;
+            letter-spacing: -0.01em;
+        }
+        .brand p {
+            margin: 4px 0 0 !important;
+            color: var(--body-text-color-subdued, #6b7280);
+            font-size: 0.92rem;
+        }
+        .lang-switch {
+            min-width: 210px;
+        }
+
+        .sidebar {
+            padding: 18px !important;
+            gap: 6px;
+            position: sticky;
+            top: 12px;
+            align-self: flex-start;
+        }
+        .sidebar h3 {
+            margin: 10px 0 2px !important;
+            font-size: 1rem;
+        }
+
+        .chat-panel {
+            padding: 16px !important;
+            gap: 10px;
+        }
+        .chatbot {
+            height: calc(100vh - 380px) !important;
+            min-height: 420px;
+            border: 1px solid var(--border-color-primary, #e5e7eb) !important;
+            border-radius: 12px !important;
+            overflow: hidden;
+        }
+
+        /* ── Composer ── */
+        .composer {
+            gap: 8px;
+            align-items: stretch;
+        }
+        .composer textarea {
+            border-radius: 10px !important;
+        }
+
+        .progress-slot {
+            min-height: 0;
+        }
+        .examples-block {
+            margin-top: 2px;
+        }
+
+        @media (max-width: 900px) {
+            .app-header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+            .main-row {
+                flex-direction: column !important;
+            }
+            .main-row > .column {
+                width: 100% !important;
+            }
+            .lang-switch {
+                min-width: 0;
+            }
+            .sidebar {
+                position: static;
+                width: 100%;
+            }
+            .chatbot {
+                height: 58vh !important;
+                min-height: 340px;
+            }
+        }
         """,
     ) as demo:
-        with gr.Row():
-            with gr.Column(scale=4):
+        with gr.Row(elem_classes="app-header"):
+            with gr.Column(scale=4, elem_classes="brand"):
                 title_md = gr.Markdown(_tr(lang0, "title"))
-            with gr.Column(scale=1, min_width=180):
+            with gr.Column(scale=1, min_width=180, elem_classes="lang-switch"):
                 lang_radio = gr.Radio(
                     choices=LANGS,
                     value=lang0,
@@ -494,7 +606,7 @@ def build_ui() -> gr.Blocks:
 
         session_id = gr.State(value=_new_session_id())
 
-        with gr.Row():
+        with gr.Row(elem_classes="main-row"):
             # Sidebar
             with gr.Column(scale=1, elem_classes="sidebar"):
                 kb_title_md = gr.Markdown(_tr(lang0, "kb_title"))
@@ -542,7 +654,7 @@ def build_ui() -> gr.Blocks:
                 )
 
             # Chat area
-            with gr.Column(scale=4):
+            with gr.Column(scale=4, elem_classes="chat-panel"):
                 chatbot = gr.Chatbot(
                     label=_tr(lang0, "chatbot_label"),
                     show_label=False,
@@ -552,7 +664,7 @@ def build_ui() -> gr.Blocks:
                     show_copy_button=True,
                 )
 
-                with gr.Row():
+                with gr.Row(elem_classes="composer"):
                     msg_input = gr.Textbox(
                         placeholder=_tr(lang0, "placeholder"),
                         scale=5,
@@ -561,18 +673,19 @@ def build_ui() -> gr.Blocks:
                     )
                     send_btn = gr.Button(_tr(lang0, "send"), variant="primary", scale=1)
 
-                progress_display = gr.HTML(value=_progress_html("idle", lang0))
+                progress_display = gr.HTML(value=_progress_html("idle", lang0),
+                                           elem_classes="progress-slot")
 
                 # Per-language example blocks (only one visible at a time).
-                with gr.Column(visible=(lang0 == "zh")) as examples_col_zh:
-                    gr.Examples(examples=I18N["zh"]["examples"],
-                                inputs=msg_input, label=I18N["zh"]["examples_label"])
-                with gr.Column(visible=(lang0 == "en")) as examples_col_en:
-                    gr.Examples(examples=I18N["en"]["examples"],
-                                inputs=msg_input, label=I18N["en"]["examples_label"])
-                with gr.Column(visible=(lang0 == "de")) as examples_col_de:
-                    gr.Examples(examples=I18N["de"]["examples"],
-                                inputs=msg_input, label=I18N["de"]["examples_label"])
+                with gr.Column(visible=(lang0 == "zh"), elem_classes="examples-block") as examples_col_zh:
+                    examples_zh = gr.Examples(examples=I18N["zh"]["examples"],
+                                              inputs=msg_input, label=I18N["zh"]["examples_label"])
+                with gr.Column(visible=(lang0 == "en"), elem_classes="examples-block") as examples_col_en:
+                    examples_en = gr.Examples(examples=I18N["en"]["examples"],
+                                              inputs=msg_input, label=I18N["en"]["examples_label"])
+                with gr.Column(visible=(lang0 == "de"), elem_classes="examples-block") as examples_col_de:
+                    examples_de = gr.Examples(examples=I18N["de"]["examples"],
+                                              inputs=msg_input, label=I18N["de"]["examples_label"])
 
         # ── Event handlers ────────────────────────────────────────
 
@@ -613,6 +726,17 @@ def build_ui() -> gr.Blocks:
             ],
             api_name=None,
         )
+
+        # Gradio's Examples captures the input component's props (including the
+        # placeholder) at build time and restores them on click. Re-apply the
+        # localized placeholder in the currently selected language afterwards.
+        for _examples in (examples_zh, examples_en, examples_de):
+            _examples.load_input_event.then(
+                fn=_placeholder_update,
+                inputs=[lang_radio],
+                outputs=[msg_input],
+                api_name=None,
+            )
 
         # Check API status on load.
         demo.load(fn=_check_api_status, outputs=api_status, api_name=None)
