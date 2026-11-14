@@ -7,6 +7,11 @@
 ## Usage
 
 ### 1. Web chat
+<table>
+  <tr>
+    <td align="center"><img src="./assets/images/RAG Assistant.gif" ></td>
+  </tr>
+</table>
 
 Open http://localhost:7860 and chat with the knowledge base. The Gradio UI calls
 the FastAPI backend on http://localhost:8000. Chat needs `LLM_API_KEY`; pure
@@ -62,7 +67,11 @@ MCP only returns retrieved snippets, so it does **not** need `LLM_API_KEY`.
 More client examples: [`docs/mcp-client-config.md`](docs/mcp-client-config.md).
 
 ### 3. opencode skill
-
+<table>
+  <tr>
+    <td align="center"><img src="./assets/images/AI_2.gif" ></td>
+  </tr>
+</table>
 This repository is itself an opencode skill (`SKILL.md` at the root). With
 `opencode.json` → `skills.paths: ["."]`, starting opencode in this directory
 auto-discovers the skill `esp-rag`; an ESP32 question then triggers
