@@ -1,4 +1,4 @@
-# ESP32 RAG Skill — Index Building and Retrieval Engine
+# ESP32 Arduino RAG Skill — Index Building and Retrieval Engine
 
 > **Note**: By default, retrieval searches the documentation corpus in `source/`. Source code (for example the `01. Software Code` materials) can additionally be indexed into a **separate** database (see §6.5). Answers are generated from the retrieved source text and cite their sources; the model is instructed not to speculate, but critical details should still be verified.
 
